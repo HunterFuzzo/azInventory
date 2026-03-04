@@ -13,7 +13,7 @@
         containerItems: [],
         shortkeyItems: [null, null, null, null, null, null],
         maxWeight: 1000,
-        containerMaxWeight: 15,
+        containerMaxWeight: 30,
         selectedSlot: null,
         contextTarget: null,
         lastAction: null,
@@ -73,7 +73,10 @@
 
         { name: 'green_syringe', label: 'Green Syringe', count: 5, weight: 0.1, description: 'Medical stimulant.' },
         { name: 'red_syringe', label: 'Red Syringe', count: 5, weight: 0.1, description: 'Combat stimulant.' },
-        { name: 'blue_syringe', label: 'Blue Syringe', count: 5, weight: 0.1, description: 'Stamina boost.' }
+        { name: 'blue_syringe', label: 'Blue Syringe', count: 5, weight: 0.1, description: 'Stamina boost.' },
+
+        // 🚗 Vehicles
+        { name: 'deluxo', label: 'Deluxo', count: 1, weight: 20.0, description: 'A flying car from the future.' }
     ];
 
     const MOCK_CONTAINER = [
@@ -190,10 +193,6 @@
                 </div>
             `;
 
-            // Tooltip events
-            slot.addEventListener('mouseenter', (e) => showTooltip(e, item));
-            slot.addEventListener('mousemove', moveTooltip);
-            slot.addEventListener('mouseleave', hideTooltip);
 
             // Context menu
             slot.addEventListener('contextmenu', (e) => {
@@ -303,10 +302,6 @@
                     renderAll();
                 });
 
-                // Tooltip
-                slot.addEventListener('mouseenter', (e) => showTooltip(e, item));
-                slot.addEventListener('mousemove', moveTooltip);
-                slot.addEventListener('mouseleave', hideTooltip);
             }
 
             frag.appendChild(slot);
@@ -352,8 +347,17 @@
     // ─── Context Menu ─────────────────────────────────────────
     function showContextMenu(e, item, zone, index) {
         e.preventDefault();
-        hideTooltip();
         state.contextTarget = { item, zone, index };
+
+        // Populate info section
+        const infoName = document.getElementById('ctx-info-name');
+        const infoDesc = document.getElementById('ctx-info-desc');
+        const infoWeight = document.getElementById('ctx-info-weight');
+        const infoQty = document.getElementById('ctx-info-qty');
+        if (infoName) infoName.textContent = item.label;
+        if (infoDesc) infoDesc.textContent = item.description || '';
+        if (infoWeight) infoWeight.textContent = `Weight: ${(item.weight * item.count).toFixed(1)} kg`;
+        if (infoQty) infoQty.textContent = `Qty: ${item.count}`;
 
         const menu = dom.contextMenu;
         menu.classList.remove('hidden');
@@ -409,17 +413,6 @@
                 postNUI('giveItem', { item: item.name, slot: index, zone, count: item.count });
                 if (isTestMode) {
                     console.log(`🤝 Gave item: ${item.label}`);
-                }
-                break;
-            case 'shortkey':
-                // Find the first empty shortkey slot or prompt
-                const emptyIdx = state.shortkeyItems.findIndex(s => s === null);
-                if (emptyIdx !== -1) {
-                    state.shortkeyItems[emptyIdx] = { ...item };
-                    renderShortkeys();
-                    initSortableShortkeys();
-                    postNUI('setShortkey', { slot: emptyIdx, item: item.name });
-                    console.log(`⌨️ Set shortkey ${emptyIdx + 1}: ${item.label}`);
                 }
                 break;
         }
@@ -663,7 +656,7 @@
             state.bagItems = (data.inventory || []).filter(i => i && i.count > 0);
             state.containerItems = data.container || [];
             state.maxWeight = data.maxWeight || 1000;
-            state.containerMaxWeight = data.containerMaxWeight || 15;
+            state.containerMaxWeight = data.containerMaxWeight || 30;
 
             if (data.shortkeys && Array.isArray(data.shortkeys)) {
                 // Shortkeys are an array of strings (item names) or false/null
@@ -731,57 +724,23 @@
     // ─── Test Mode Bootstrap ──────────────────────────────────
     if (isTestMode) {
         console.log('%c🎮 ESX Inventory – Test Mode', 'color: #e53935; font-size: 16px; font-weight: bold;');
-        console.log('%cPress [TAB] or click the button to toggle inventory', 'color: #9e9e9e;');
-
-        // Create toggle button for test mode
-        const toggleBtn = document.createElement('button');
-        toggleBtn.id = 'test-toggle';
-        toggleBtn.innerHTML = '📦 Toggle Inventory (TAB)';
-        toggleBtn.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 99999;
-            padding: 12px 24px;
-            background: #e53935;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-family: 'Inter', sans-serif;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            box-shadow: 0 4px 16px rgba(229, 57, 53, 0.3);
-            transition: all 0.2s ease;
-        `;
-        toggleBtn.addEventListener('mouseenter', () => {
-            toggleBtn.style.transform = 'scale(1.05)';
-            toggleBtn.style.boxShadow = '0 6px 24px rgba(229, 57, 53, 0.5)';
-        });
-        toggleBtn.addEventListener('mouseleave', () => {
-            toggleBtn.style.transform = 'scale(1)';
-            toggleBtn.style.boxShadow = '0 4px 16px rgba(229, 57, 53, 0.3)';
-        });
-        toggleBtn.addEventListener('click', () => {
-            if (state.isOpen) {
-                closeInventory();
-            } else {
-                openInventory({
-                    inventory: MOCK_ITEMS,
-                    container: MOCK_CONTAINER,
-                    maxWeight: 1000,
-                    playerName: 'John Doe',
-                    playerId: 42,
-                });
-            }
-        });
-        document.body.appendChild(toggleBtn);
+        console.log('%cPress [TAB] to toggle inventory', 'color: #9e9e9e;');
 
         // TAB key toggle
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Tab') {
                 e.preventDefault();
-                toggleBtn.click();
+                if (state.isOpen) {
+                    closeInventory();
+                } else {
+                    openInventory({
+                        inventory: MOCK_ITEMS,
+                        container: MOCK_CONTAINER,
+                        maxWeight: 1000,
+                        playerName: 'John Doe',
+                        playerId: 42,
+                    });
+                }
             }
         });
 

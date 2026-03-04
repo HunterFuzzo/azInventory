@@ -530,6 +530,36 @@ body {
     margin: 3px 6px;
 }
 
+/* Info section at top of context menu */
+.context-menu-info {
+    padding: 8px 10px 6px;
+}
+
+.ctx-info-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 3px;
+}
+
+.ctx-info-desc {
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.35;
+    margin-bottom: 5px;
+}
+
+.ctx-info-stats {
+    display: flex;
+    gap: 10px;
+    font-size: 10px;
+    color: var(--text-dim);
+    font-weight: 500;
+    border-top: 1px solid #222;
+    padding-top: 5px;
+    font-variant-numeric: tabular-nums;
+}
+
 /* ─── Tooltip ─────────────────────────────────────────────── */
 .item-tooltip {
     position: fixed;

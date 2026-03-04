@@ -75,17 +75,34 @@ end)
 
 AddEventHandler('esx:playerDropped', function(playerId)
     local xPlayer = ESX.GetPlayerFromId(playerId)
-    if xPlayer and playerCustomData[xPlayer.identifier] then
-        MySQL.update('UPDATE user_inventory_custom SET container = ?, shortkeys = ? WHERE identifier = ?', {
-            json.encode(playerCustomData[xPlayer.identifier].container),
-            json.encode(playerCustomData[xPlayer.identifier].shortkeys),
-            xPlayer.identifier
-        })
-        playerCustomData[xPlayer.identifier] = nil
+    if xPlayer then
+        -- Force sauvegarde en cas de déconnexion brutale
+        if playerCustomData[xPlayer.identifier] then
+            MySQL.update('UPDATE user_inventory_custom SET container = ?, shortkeys = ? WHERE identifier = ?', {
+                json.encode(playerCustomData[xPlayer.identifier].container),
+                json.encode(playerCustomData[xPlayer.identifier].shortkeys),
+                xPlayer.identifier
+            })
+            playerCustomData[xPlayer.identifier] = nil
+        end
+        -- Libération du verrou en cas de déconnexion pendant une transaction
+        isProcessing[playerId] = nil
     end
 end)
 
 -- ─── Server Callbacks ─────────────────────────────────────
+-- Mutex : empêche les requêtes simultanées par joueur
+local isProcessing = {}
+
+local function lockPlayer(source)
+    if isProcessing[source] then return false end
+    isProcessing[source] = true
+    return true
+end
+
+local function unlockPlayer(source)
+    isProcessing[source] = nil
+end
 
 -- Move item between zones
 ESX.RegisterServerCallback('esx_inventory:moveItem', function(source, cb, fromZone, toZone, itemName, count)
@@ -96,10 +113,17 @@ ESX.RegisterServerCallback('esx_inventory:moveItem', function(source, cb, fromZo
         return
     end
 
+    -- Anti-dupe : rejet si une transaction est déjà en cours
+    if not lockPlayer(source) then
+        cb(false)
+        return
+    end
+
     local customData = playerCustomData[xPlayer.identifier]
     count = count or 1 -- Default to 1 if not provided
 
     if fromZone == 'bag' and toZone == 'bag' then
+        unlockPlayer(source)
         cb(true)
         return
     end
@@ -124,6 +148,7 @@ ESX.RegisterServerCallback('esx_inventory:moveItem', function(source, cb, fromZo
             if CanCarryWeight(xPlayer, GetItemWeight(itemName) * count) then
                 xPlayer.addInventoryItem(itemName, count)
                 MySQL.update('UPDATE user_inventory_custom SET container = ? WHERE identifier = ?', {json.encode(customData.container), xPlayer.identifier})
+                unlockPlayer(source)
                 cb(true)
             else
                 -- Revert if cannot carry
@@ -139,9 +164,11 @@ ESX.RegisterServerCallback('esx_inventory:moveItem', function(source, cb, fromZo
                     table.insert(customData.container, {name = itemName, count = count, label = itemName, weight = GetItemWeight(itemName)})
                 end
                 xPlayer.showNotification('~r~Cannot carry this much weight!')
+                unlockPlayer(source)
                 cb(false)
             end
         else
+            unlockPlayer(source)
             cb(false)
         end
         return
@@ -173,14 +200,17 @@ ESX.RegisterServerCallback('esx_inventory:moveItem', function(source, cb, fromZo
             end
             
             MySQL.update('UPDATE user_inventory_custom SET container = ? WHERE identifier = ?', {json.encode(customData.container), xPlayer.identifier})
+            unlockPlayer(source)
             cb(true)
         else
+            unlockPlayer(source)
             cb(false)
         end
         return
     end
 
-    -- Default: allow
+    -- Default
+    unlockPlayer(source)
     cb(true)
 end)
 
@@ -216,12 +246,20 @@ ESX.RegisterServerCallback('esx_inventory:useItem', function(source, cb, itemNam
         return
     end
 
+    -- Anti-dupe : vérifier que le joueur n'est pas en train de faire autre chose
+    if not lockPlayer(source) then
+        cb(false)
+        return
+    end
+
+    -- Le serveur vérifie lui-même la possession réelle de l'item
     local item = xPlayer.getInventoryItem(itemName)
     if item and item.count > 0 then
-        -- Trigger the item use event (for other scripts to handle)
         xPlayer.useItem(itemName)
+        unlockPlayer(source)
         cb(true)
     else
+        unlockPlayer(source)
         cb(false)
     end
 end)
@@ -235,12 +273,21 @@ ESX.RegisterServerCallback('esx_inventory:dropItem', function(source, cb, itemNa
         return
     end
 
+    if not lockPlayer(source) then
+        cb(false)
+        return
+    end
+
+    -- Le serveur ignore le count du client et utilise le réel
     local item = xPlayer.getInventoryItem(itemName)
-    if item and item.count >= count then
-        xPlayer.removeInventoryItem(itemName, count)
-        print(('[esx_inventory] %s dropped %dx %s'):format(xPlayer.getName(), count, itemName))
+    if item and item.count >= 1 then
+        local toDrop = math.min(count or 1, item.count) -- jamais plus que ce qu'il a
+        xPlayer.removeInventoryItem(itemName, toDrop)
+        print(('[esx_inventory] %s dropped %dx %s'):format(xPlayer.getName(), toDrop, itemName))
+        unlockPlayer(source)
         cb(true)
     else
+        unlockPlayer(source)
         cb(false)
     end
 end)
@@ -254,11 +301,19 @@ ESX.RegisterServerCallback('esx_inventory:giveItem', function(source, cb, itemNa
         return
     end
 
-    local item = xPlayer.getInventoryItem(itemName)
-    if not item or item.count < count then
+    if not lockPlayer(source) then
         cb(false)
         return
     end
+
+    -- Vérification entièrement côté serveur
+    local item = xPlayer.getInventoryItem(itemName)
+    if not item or item.count < 1 then
+        unlockPlayer(source)
+        cb(false)
+        return
+    end
+    count = math.min(count or 1, item.count) -- jamais plus que ce qu'on possède
 
     -- Find nearest player
     local playerPed = GetPlayerPed(source)
@@ -290,15 +345,55 @@ ESX.RegisterServerCallback('esx_inventory:giveItem', function(source, cb, itemNa
             print(('[esx_inventory] %s gave %dx %s to %s'):format(
                 xPlayer.getName(), count, itemName, xTarget.getName()
             ))
+            unlockPlayer(source)
             cb(true)
         else
             xPlayer.showNotification('~r~Target inventory is full!')
+            unlockPlayer(source)
             cb(false)
         end
     else
         xPlayer.showNotification('~r~No player nearby!')
+        unlockPlayer(source)
         cb(false)
     end
+end)
+
+-- ─── Vehicle Items ────────────────────────────────────────
+-- Whitelist des modèles autorisés comme items
+local allowedVehicleItems = { deluxo = true }
+
+ESX.RegisterUsableItem('deluxo', function(source)
+    if not lockPlayer(source) then return end
+
+    local xPlayer = ESX.GetPlayerFromId(source)
+    -- Vérification serveur : le joueur possède-t-il vraiment l'item ?
+    local item = xPlayer.getInventoryItem('deluxo')
+    if not item or item.count < 1 then
+        unlockPlayer(source)
+        return
+    end
+
+    xPlayer.removeInventoryItem('deluxo', 1)
+    TriggerClientEvent('esx_inventory:spawnVehicle', source, 'deluxo')
+    unlockPlayer(source)
+end)
+
+RegisterNetEvent('esx_inventory:returnVehicleItem')
+AddEventHandler('esx_inventory:returnVehicleItem', function(model)
+    local xPlayer = ESX.GetPlayerFromId(source)
+    if not xPlayer then return end
+
+    if not lockPlayer(source) then return end
+
+    -- Sécurité : refuser tout modèle non whitelisté (anti-injection)
+    if not allowedVehicleItems[model] then
+        unlockPlayer(source)
+        return
+    end
+
+    xPlayer.addInventoryItem(model, 1)
+    unlockPlayer(source)
 end)
 
 -- ─── Weight Info Command ──────────────────────────────────

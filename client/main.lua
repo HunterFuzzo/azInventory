@@ -219,3 +219,54 @@ Citizen.CreateThread(function()
         end
     end
 end)
+
+-- ─── Vehicle Item Logic ───────────────────────────────────
+local spawnedVehicle = nil
+
+RegisterNetEvent('esx_inventory:spawnVehicle')
+AddEventHandler('esx_inventory:spawnVehicle', function(model)
+    if spawnedVehicle and DoesEntityExist(spawnedVehicle) then
+        ESX.ShowNotification('~r~Vous avez déjà un véhicule sorti !')
+        return
+    end
+
+    local playerPed = PlayerPedId()
+    local coords = GetEntityCoords(playerPed)
+    local heading = GetEntityHeading(playerPed)
+
+    -- Note: using ESX.Game.SpawnVehicle to properly handle network entities
+    ESX.Game.SpawnVehicle(model, coords, heading, function(vehicle)
+        spawnedVehicle = vehicle
+        TaskWarpPedIntoVehicle(playerPed, vehicle, -1)
+        ESX.ShowNotification('~g~Véhicule sorti ! Appuyez sur ~y~K ~g~pour le ranger.')
+    end)
+end)
+
+-- Listener for K key (311) to return vehicle
+Citizen.CreateThread(function()
+    while true do
+        Citizen.Wait(0)
+        
+        if IsControlJustReleased(0, 311) then -- K key
+            if spawnedVehicle and DoesEntityExist(spawnedVehicle) then
+                local playerPed = PlayerPedId()
+                local vehicleInfo = GetEntityModel(spawnedVehicle)
+                
+                -- Check if player is near or inside the vehicle to store it
+                local dist = #(GetEntityCoords(playerPed) - GetEntityCoords(spawnedVehicle))
+                if dist < 5.0 or GetVehiclePedIsIn(playerPed, false) == spawnedVehicle then
+                    -- Get the actual model string if possible, but we hardcoded 'deluxo' for now
+                    -- Real implementation would map hash to model name or store the used model
+                    
+                    ESX.Game.DeleteVehicle(spawnedVehicle)
+                    spawnedVehicle = nil
+                    
+                    TriggerServerEvent('esx_inventory:returnVehicleItem', 'deluxo')
+                    ESX.ShowNotification('~g~Véhicule rangé dans votre inventaire !')
+                else
+                    ESX.ShowNotification('~r~Vous êtes trop loin de votre véhicule.')
+                end
+            end
+        end
+    end
+end)

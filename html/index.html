@@ -112,8 +112,16 @@
         </main>
     </div>
 
-    <!-- Context Menu -->
     <div id="context-menu" class="context-menu hidden">
+        <div class="context-menu-info" id="context-menu-info">
+            <div class="ctx-info-name" id="ctx-info-name"></div>
+            <div class="ctx-info-desc" id="ctx-info-desc"></div>
+            <div class="ctx-info-stats">
+                <span id="ctx-info-weight"></span>
+                <span id="ctx-info-qty"></span>
+            </div>
+        </div>
+        <div class="ctx-divider"></div>
         <div class="context-menu-item" data-action="use">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="20 6 9 17 4 12" />
@@ -136,15 +144,6 @@
                 <path d="M9 6V4h6v2" />
             </svg>
             <span>Drop</span>
-        </div>
-        <div class="ctx-divider"></div>
-        <div class="context-menu-item" data-action="shortkey">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="2" y="7" width="20" height="14" rx="2" />
-                <path d="M16 3l0 4" />
-                <path d="M8 3l0 4" />
-            </svg>
-            <span>Set Hotbar</span>
         </div>
     </div>
 
