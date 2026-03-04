@@ -70,9 +70,9 @@ app.post('/esx_inventory/:action', (req, res) => {
 app.listen(PORT, () => {
     console.log('');
     console.log('\x1b[31m╔══════════════════════════════════════════╗\x1b[0m');
-    console.log('\x1b[31m║\x1b[0m  🎮 ESX Inventory – Dev Server           \x1b[31m║\x1b[0m');
+    console.log('\x1b[31m║\x1b[0m  ESX Inventory – Dev Server              \x1b[31m║\x1b[0m');
     console.log('\x1b[31m║\x1b[0m                                          \x1b[31m║\x1b[0m');
-    console.log(`\x1b[31m║\x1b[0m  → http://localhost:${PORT}                 \x1b[31m║\x1b[0m`);
+    console.log(`\x1b[31m║\x1b[0m  http://localhost:${PORT}                   \x1b[31m║\x1b[0m`);
     console.log('\x1b[31m║\x1b[0m  Press TAB to open inv.                  \x1b[31m║\x1b[0m');
     console.log('\x1b[31m║\x1b[0m  Press ESC to close.                     \x1b[31m║\x1b[0m');
     console.log('\x1b[31m╚══════════════════════════════════════════╝\x1b[0m');
