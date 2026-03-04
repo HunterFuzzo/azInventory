@@ -73,6 +73,31 @@ AddEventHandler('esx:playerLoaded', function(playerId, xPlayer, isNew)
     end)
 end)
 
+-- Initialisation pour les joueurs déjà connectés lors du start/restart du script
+AddEventHandler('onResourceStart', function(resourceName)
+    if GetCurrentResourceName() == resourceName then
+        Citizen.Wait(2000) -- Attente pour que ESX soit bien initialisé
+        local players = ESX.GetPlayers()
+        for i=1, #players do
+            local xPlayer = ESX.GetPlayerFromId(players[i])
+            if xPlayer then
+                MySQL.query('SELECT container, shortkeys FROM user_inventory_custom WHERE identifier = ?', {xPlayer.identifier}, function(result)
+                    local container = {}
+                    local shortkeys = {}
+                    if result and result[1] then
+                        container = json.decode(result[1].container) or {}
+                        shortkeys = json.decode(result[1].shortkeys) or {}
+                    else
+                        MySQL.insert('INSERT INTO user_inventory_custom (identifier, container, shortkeys) VALUES (?, ?, ?)', {xPlayer.identifier, '[]', '[]'})
+                    end
+                    playerCustomData[xPlayer.identifier] = { container = container, shortkeys = shortkeys }
+                    TriggerClientEvent('esx_inventory:loadCustomData', players[i], container, shortkeys)
+                end)
+            end
+        end
+    end
+end)
+
 AddEventHandler('esx:playerDropped', function(playerId)
     local xPlayer = ESX.GetPlayerFromId(playerId)
     if xPlayer then
@@ -149,7 +174,7 @@ ESX.RegisterServerCallback('esx_inventory:moveItem', function(source, cb, fromZo
                 xPlayer.addInventoryItem(itemName, count)
                 MySQL.update('UPDATE user_inventory_custom SET container = ? WHERE identifier = ?', {json.encode(customData.container), xPlayer.identifier})
                 unlockPlayer(source)
-                cb(true)
+                cb(true, customData.container)
             else
                 -- Revert if cannot carry
                 local reverted = false
@@ -201,7 +226,7 @@ ESX.RegisterServerCallback('esx_inventory:moveItem', function(source, cb, fromZo
             
             MySQL.update('UPDATE user_inventory_custom SET container = ? WHERE identifier = ?', {json.encode(customData.container), xPlayer.identifier})
             unlockPlayer(source)
-            cb(true)
+            cb(true, customData.container)
         else
             unlockPlayer(source)
             cb(false)
@@ -256,7 +281,27 @@ ESX.RegisterServerCallback('esx_inventory:useItem', function(source, cb, itemNam
     -- Le serveur vérifie lui-même la possession réelle de l'item
     local item = xPlayer.getInventoryItem(itemName)
     if item and item.count > 0 then
-        print(('[esx_inventory] %s using item %s via useItem'):format(xPlayer.getName(), itemName))
+        print(('[esx_inventory] %s using item %s via esx_inventory:useItem'):format(xPlayer.getName(), itemName))
+        
+        -- Bypass pour les armes custom : on gère directement au lieu de dépendre du dispatch ESX
+        if Config and Config.WeaponItems and Config.WeaponItems[itemName] then
+            print(('[esx_inventory] Custom weapon detected in useItem bypass: %s'):format(itemName))
+            TriggerClientEvent('esx_inventory:giveWeaponToPed', source, itemName, Config.WeaponItems[itemName])
+            unlockPlayer(source)
+            cb(true)
+            return
+        end
+
+        -- Bypass pour les véhicules custom
+        if Config and Config.VehicleItems and Config.VehicleItems[itemName] then
+            print(('[esx_inventory] Custom vehicle detected in useItem bypass: %s'):format(itemName))
+            xPlayer.removeInventoryItem(itemName, 1)
+            TriggerClientEvent('esx_inventory:spawnVehicle', source, Config.VehicleItems[itemName], itemName)
+            unlockPlayer(source)
+            cb(true)
+            return
+        end
+
         xPlayer.useItem(itemName)
         unlockPlayer(source)
         cb(true)
@@ -363,34 +408,69 @@ ESX.RegisterServerCallback('esx_inventory:giveItem', function(source, cb, itemNa
 end)
 
 -- ─── Vehicle & Weapon Items ───────────────────────────────
--- Whitelist des modèles autorisés comme items (véhicules)
-local allowedVehicleItems = { 
-    deluxo = true,
-    zentorno = true,
-    t20 = true,
-    sanchez = true,
-    bmx = true
-}
+-- ─── Vehicle & Weapon Items ───────────────────────────────
+-- Utilisation des véhicules configurés
+if Config and Config.VehicleItems then
+    for vehicleItemName, vehicleModel in pairs(Config.VehicleItems) do
+        ESX.RegisterUsableItem(vehicleItemName, function(source)
+            print(('[esx_inventory] Usable item triggered for vehicle: %s (source: %s)'):format(vehicleItemName, source))
+            
+            local xPlayer = ESX.GetPlayerFromId(source)
+            -- Vérification serveur : le joueur possède-t-il vraiment l'item ?
+            local item = xPlayer.getInventoryItem(vehicleItemName)
+            if not item or item.count < 1 then
+                print('[esx_inventory] Failed to spawn vehicle: player does not have item ' .. vehicleItemName)
+                return
+            end
 
-for model, _ in pairs(allowedVehicleItems) do
-    ESX.RegisterUsableItem(model, function(source)
-        print(('[esx_inventory] Usable item triggered for vehicle: %s (source: %s)'):format(model, source))
-        -- We do NOT call lockPlayer here because esx_inventory:useItem ALREADY locks the player 
-        -- before triggering ESX.UseItem, which invokes this callback. Double-locking causes failure!
-        
-        local xPlayer = ESX.GetPlayerFromId(source)
-        -- Vérification serveur : le joueur possède-t-il vraiment l'item ?
-        local item = xPlayer.getInventoryItem(model)
-        if not item or item.count < 1 then
-            print('[esx_inventory] Failed to spawn vehicle: player does not have item ' .. model)
-            return
-        end
-
-        xPlayer.removeInventoryItem(model, 1)
-        TriggerClientEvent('esx_inventory:spawnVehicle', source, model)
-        print('[esx_inventory] Vehicle spawned successfully: ' .. model)
-    end)
+            xPlayer.removeInventoryItem(vehicleItemName, 1)
+            TriggerClientEvent('esx_inventory:spawnVehicle', source, vehicleModel, vehicleItemName)
+            print('[esx_inventory] Vehicle spawned successfully: ' .. vehicleModel)
+        end)
+    end
 end
+
+RegisterNetEvent('esx_inventory:returnVehicleItem')
+AddEventHandler('esx_inventory:returnVehicleItem', function(model)
+    local _source = source
+    local xPlayer = ESX.GetPlayerFromId(_source)
+    if not xPlayer then return end
+
+    -- 1. Sécurité anti-spam (si tu utilises lockPlayer)
+    if lockPlayer then 
+        if not lockPlayer(_source) then return end 
+    end
+
+    -- 2. Vérification de sécurité (Whitelist du modèle)
+    -- On vérifie soit dans ta table allowedVehicleItems, soit dans ta Config
+    local isAllowed = false
+    if allowedVehicleItems and allowedVehicleItems[model] then
+        isAllowed = true
+    elseif Config and Config.VehicleItems and Config.VehicleItems[model] then
+        isAllowed = true
+    end
+
+    if isAllowed then
+        -- 3. Gestion du poids (Optionnel mais propre)
+        local itemWeight = 0
+        if GetItemWeight then itemWeight = GetItemWeight(model) end
+
+        -- On ajoute l'item
+        xPlayer.addInventoryItem(model, 1)
+
+        -- 4. Synchronisation forcée
+        -- On prévient le client que son inventaire a changé pour qu'il rafraîchisse la Hotbar
+        local updatedInventory = xPlayer.getInventory()
+        TriggerClientEvent('esx_inventory:updateInventory', _source, updatedInventory)
+        
+        print(('[esx_inventory] Joueur %s a rangé son véhicule : %s'):format(xPlayer.identifier, model))
+    else
+        print(('[esx_inventory] Tentative de rangement de véhicule non autorisé par ID %s : %s'):format(_source, model))
+    end
+
+    -- 5. Débloquer le joueur
+    if unlockPlayer then unlockPlayer(_source) end
+end)
 
 -- Weapons as items: register usable items for all WEAPON_* items
 -- When used, trigger a client event to give the weapon to the ped physically
@@ -405,41 +485,45 @@ MySQL.ready(function()
                 -- Vérification serveur : le joueur possède bien l'arme en item
                 local item = xPlayer.getInventoryItem(weaponName)
                 if not item or item.count < 1 then
-                    print(('[esx_inventory] %s tried to use weapon item %s but does not have it'):format(xPlayer.getName(), weaponName))
                     return
                 end
 
                 -- Donner l'arme physiquement au ped côté client
-                print(('[esx_inventory] Giving weapon %s physically to %s'):format(weaponName, xPlayer.getName()))
                 TriggerClientEvent('esx_inventory:giveWeaponToPed', source, weaponName)
             end)
         end
     end)
 end)
 
--- Retirer physiquement une arme du ped (dé-équipement)
-RegisterNetEvent('esx_inventory:removeWeaponFromPed')
-AddEventHandler('esx_inventory:removeWeaponFromPed', function(weaponName)
-    -- Validation basique : seulement accepter des noms WEAPON_*
-    if type(weaponName) ~= 'string' or string.sub(string.upper(weaponName), 1, 7) ~= 'WEAPON_' then return end
-    TriggerClientEvent('esx_inventory:removeWeaponFromPed', source, weaponName)
-end)
+-- Enregistrer également les armes personnalisées (items) depuis la config (statique)
+if Config and Config.WeaponItems then
+    for customItemName, weaponHashName in pairs(Config.WeaponItems) do
+        ESX.RegisterUsableItem(customItemName, function(source)
+            local xPlayer = ESX.GetPlayerFromId(source)
+            if not xPlayer then return end
 
-RegisterNetEvent('esx_inventory:returnVehicleItem')
-AddEventHandler('esx_inventory:returnVehicleItem', function(model)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if not xPlayer then return end
+            -- Vérification serveur : le joueur possède bien l'item custom
+            local item = xPlayer.getInventoryItem(customItemName)
+            if not item or item.count < 1 then
+                print(('[esx_inventory] %s tried to use custom weapon %s but does not have it'):format(xPlayer.getName(), customItemName))
+                return
+            end
 
-    if not lockPlayer(source) then return end
-
-    -- Sécurité : refuser tout modèle non whitelisté (anti-injection)
-    if not allowedVehicleItems[model] then
-        unlockPlayer(source)
-        return
+            -- Donner l'arme physiquement au ped côté client
+            print(('[esx_inventory] Equip custom weapon: %s -> %s for %s'):format(customItemName, weaponHashName, xPlayer.getName()))
+            TriggerClientEvent('esx_inventory:giveWeaponToPed', source, customItemName, weaponHashName)
+        end)
     end
+end
 
-    xPlayer.addInventoryItem(model, 1)
-    unlockPlayer(source)
+RegisterNetEvent('esx_inventory:removeWeaponFromPed')
+AddEventHandler('esx_inventory:removeWeaponFromPed', function(itemName)
+    -- Validation : vérifier si c'est une arme native ("WEAPON_...") ou une arme custom conf
+    local isCustom = (Config and Config.WeaponItems and Config.WeaponItems[itemName])
+    if not isCustom and (type(itemName) ~= 'string' or string.sub(string.upper(itemName), 1, 7) ~= 'WEAPON_') then 
+        return 
+    end
+    TriggerClientEvent('esx_inventory:removeWeaponFromPed', source, itemName)
 end)
 
 -- ─── Weight Info Command ──────────────────────────────────

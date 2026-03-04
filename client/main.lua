@@ -16,6 +16,7 @@ end)
 
 local CustomContainer = {}
 local CustomShortkeys = {}
+local currentWeapon = nil -- Track the currently equipped weapon from shortkey
 
 -- Receive data from server on load
 RegisterNetEvent('esx_inventory:loadCustomData')
@@ -59,6 +60,43 @@ function OpenInventory()
     })
 end
 
+-- ─── Refresh UI Function ───────────────────────────────────
+function RefreshInventoryNUI()
+    if not isOpen then return end
+    local playerData = ESX.GetPlayerData()
+    if not playerData or not playerData.inventory then return end
+
+    local inventory = {}
+    for _, item in ipairs(playerData.inventory) do
+        if item.count > 0 then
+            table.insert(inventory, {
+                name = item.name,
+                label = item.label,
+                count = item.count,
+                weight = item.weight or 0.1,
+                description = item.description or ''
+            })
+        end
+    end
+
+    SendNUIMessage({
+        action = 'updateInventory',
+        inventory = inventory,
+        container = CustomContainer
+    })
+    
+    -- Pour forcer également le reset visuel des touches :
+    SendNUIMessage({
+        action = 'openInventory',
+        inventory = inventory,
+        container = CustomContainer,
+        shortkeys = CustomShortkeys,
+        maxWeight = 1000,
+        playerName = GetPlayerName(PlayerId()),
+        playerId = GetPlayerServerId(PlayerId())
+    })
+end
+
 -- ─── Close Inventory ──────────────────────────────────────
 function CloseInventory()
     if not isOpen then return end
@@ -71,16 +109,12 @@ Citizen.CreateThread(function()
     while true do
         Citizen.Wait(0)
         
-        -- Disable weapon wheel (TAB=37, 192), (L1/LB = 157, 158, 159, 160)
+        -- Only disable the weapon wheel
         DisableControlAction(0, 37, true)
         DisableControlAction(0, 192, true)
         DisableControlAction(0, 204, true)
         DisableControlAction(0, 211, true)
         DisableControlAction(0, 349, true)
-        DisableControlAction(0, 157, true)
-        DisableControlAction(0, 158, true)
-        DisableControlAction(0, 159, true)
-        DisableControlAction(0, 160, true)
         
         -- Override TAB key to toggle inventory manually
         if IsDisabledControlJustReleased(0, 37) then -- TAB key
@@ -124,6 +158,11 @@ end)
 
 -- Move item between zones
 RegisterNUICallback('moveItem', function(data, cb)
+    if currentWeapon and data.item == currentWeapon and data.fromZone == 'bag' then
+        TriggerEvent('esx_inventory:removeWeaponFromPed', currentWeapon)
+        ESX.ShowNotification('~y~Arme déséquipée automatiquement.')
+    end
+
     ESX.TriggerServerCallback('esx_inventory:moveItem', function(success, updatedContainer)
         if success then
             if updatedContainer then 
@@ -167,6 +206,11 @@ end)
 
 -- Drop item
 RegisterNUICallback('dropItem', function(data, cb)
+    if currentWeapon and data.item == currentWeapon then
+        TriggerEvent('esx_inventory:removeWeaponFromPed', currentWeapon)
+        ESX.ShowNotification('~y~Arme déséquipée automatiquement.')
+    end
+
     ESX.TriggerServerCallback('esx_inventory:dropItem', function(success)
         if success then
             local playerData = ESX.GetPlayerData()
@@ -193,6 +237,11 @@ end)
 
 -- Give item
 RegisterNUICallback('giveItem', function(data, cb)
+    if currentWeapon and data.item == currentWeapon then
+        TriggerEvent('esx_inventory:removeWeaponFromPed', currentWeapon)
+        ESX.ShowNotification('~y~Arme déséquipée automatiquement.')
+    end
+
     ESX.TriggerServerCallback('esx_inventory:giveItem', function(success)
         cb({ success = success })
     end, data.item, data.count)
@@ -200,25 +249,45 @@ end)
 
 -- Set shortkey
 RegisterNUICallback('setShortkey', function(data, cb)
-    -- data is { slot: Number, item: String|null }
+    local slotIndex = data.slot + 1
+    local oldItem = CustomShortkeys[slotIndex]
+    
+    -- Si l'item qui sort du slot est celui qu'on pense avoir en main
+    if oldItem ~= nil and oldItem ~= false and oldItem == currentWeapon then
+        local playerPed = PlayerPedId()
+        
+        -- On force le désarmement immédiat
+        SetCurrentPedWeapon(playerPed, GetHashKey("WEAPON_UNARMED"), true)
+        
+        -- On retire l'arme physiquement (si c'est ton système)
+        local weaponHash = GetHashKey(oldItem)
+        if Config and Config.WeaponItems and Config.WeaponItems[oldItem] then
+            weaponHash = GetHashKey(Config.WeaponItems[oldItem])
+        end
+        RemoveWeaponFromPed(playerPed, weaponHash)
+        
+        currentWeapon = nil -- On oublie l'arme
+        ESX.ShowNotification('~y~Arme retirée de la main.')
+    end
+
+    -- Mise à jour habituelle
     if data.item == nil then
-        CustomShortkeys[data.slot + 1] = false
+        CustomShortkeys[slotIndex] = false
     else
-        CustomShortkeys[data.slot + 1] = data.item
+        CustomShortkeys[slotIndex] = data.item
     end
     
     TriggerServerEvent('esx_inventory:setShortkey', data.slot, data.item)
     cb('ok')
 end)
-
 -- ─── Weapon & Shortkey Usage (1-5 keys) ───────────────────
-local currentWeapon = nil -- Track the currently equipped weapon from shortkey
 
 -- Reçu du serveur : donner physiquement l'arme au ped et l'équiper
 RegisterNetEvent('esx_inventory:giveWeaponToPed')
-AddEventHandler('esx_inventory:giveWeaponToPed', function(weaponName)
+AddEventHandler('esx_inventory:giveWeaponToPed', function(itemName, actualWeaponName)
     local playerPed = PlayerPedId()
-    local weaponHash = GetHashKey(weaponName)
+    local weaponToGive = actualWeaponName or itemName
+    local weaponHash = GetHashKey(weaponToGive)
 
     -- Donner l'arme avec munitions par défaut si non possédée
     if not HasPedGotWeapon(playerPed, weaponHash, false) then
@@ -226,20 +295,23 @@ AddEventHandler('esx_inventory:giveWeaponToPed', function(weaponName)
     end
 
     SetCurrentPedWeapon(playerPed, weaponHash, true)
-    currentWeapon = weaponName
-    print('[esx_inventory] Weapon given to ped and equipped: ' .. weaponName)
+    currentWeapon = itemName
 end)
 
 -- Reçu du serveur : retirer physiquement l'arme du ped
 RegisterNetEvent('esx_inventory:removeWeaponFromPed')
-AddEventHandler('esx_inventory:removeWeaponFromPed', function(weaponName)
+AddEventHandler('esx_inventory:removeWeaponFromPed', function(itemName)
     local playerPed = PlayerPedId()
-    local weaponHash = GetHashKey(weaponName)
+    local actualWeaponName = itemName
+    if Config and Config.WeaponItems and Config.WeaponItems[itemName] then
+        actualWeaponName = Config.WeaponItems[itemName]
+    end
+    local weaponHash = GetHashKey(actualWeaponName)
+    
     RemoveWeaponFromPed(playerPed, weaponHash)
-    if currentWeapon == weaponName then
+    if currentWeapon == itemName then
         currentWeapon = nil
     end
-    print('[esx_inventory] Weapon removed from ped: ' .. weaponName)
 end)
 
 Citizen.CreateThread(function()
@@ -247,48 +319,50 @@ Citizen.CreateThread(function()
         Citizen.Wait(0)
 
         if not isOpen then
-            -- Keys 1-5 for shortkeys
-            for i = 1, 5 do
-                if IsControlJustReleased(0, 156 + i) then -- Keys 1-5
-                    local itemName = CustomShortkeys[i]
+            local keys = {157, 158, 160, 164, 165} -- Touches 1, 2, 3, 4, 5
+            for i = 1, #keys do
+                if IsControlJustReleased(0, keys[i]) or IsDisabledControlJustReleased(0, keys[i]) then
+                    local slotIndex = i
+                    local itemName = CustomShortkeys[slotIndex]
+                    
                     if itemName and type(itemName) == 'string' then
-                        if string.sub(string.upper(itemName), 1, 7) == "WEAPON_" then
-                            -- Handle weapon equip/unequip
-                            local playerPed = PlayerPedId()
-                            local weaponHash = GetHashKey(itemName)
+                        local isNativeWeapon = (string.sub(string.upper(itemName), 1, 7) == "WEAPON_")
+                        local isCustomWeapon = (Config and Config.WeaponItems and Config.WeaponItems[itemName] ~= nil)
 
+                        if isNativeWeapon or isCustomWeapon then
+                            local playerPed = PlayerPedId()
+                            local weaponName = isCustomWeapon and Config.WeaponItems[itemName] or itemName
+                            local weaponHash = GetHashKey(weaponName)
+
+                            -- --- LOGIQUE DE BASCULE (TOGGLE) ---
                             if currentWeapon == itemName then
-                                -- Dé-équiper : remettre les poings
+                                -- Si on a déjà CETTE arme en main, on la range
                                 SetCurrentPedWeapon(playerPed, GetHashKey("WEAPON_UNARMED"), true)
                                 currentWeapon = nil
-                            elseif HasPedGotWeapon(playerPed, weaponHash, false) then
-                                -- L'arme est déjà sur le ped : équiper directement
-                                SetCurrentPedWeapon(playerPed, weaponHash, true)
-                                currentWeapon = itemName
+                                print('[esx_inventory] Arme rangée (touche réappuyée)')
                             else
-                                -- L'arme existe seulement en tant qu'item : appeler useItem
-                                -- Le serveur vérifie la possession et envoie giveWeaponToPed
-                                ESX.TriggerServerCallback('esx_inventory:useItem', function(success)
-                                    if not success then
-                                        print('[esx_inventory] useItem failed for weapon: ' .. tostring(itemName))
-                                    end
-                                    -- L'équipement est géré par l'event giveWeaponToPed reçu du serveur
-                                end, itemName, i - 1)
+                                -- Sinon, on vérifie si le ped a l'arme et on l'équipe
+                                if HasPedGotWeapon(playerPed, weaponHash, false) then
+                                    SetCurrentPedWeapon(playerPed, weaponHash, true)
+                                    currentWeapon = itemName
+                                    print('[esx_inventory] Arme équipée : ' .. itemName)
+                                else
+                                    -- Si le ped ne l'a pas physiquement, on demande au serveur via useItem
+                                    ESX.TriggerServerCallback('esx_inventory:useItem', function(success)
+                                        if success then currentWeapon = itemName end
+                                    end, itemName, slotIndex - 1)
+                                end
                             end
                         else
-                            -- Item normal
-                            ESX.TriggerServerCallback('esx_inventory:useItem', function(success)
-                                if not success then
-                                    print('[esx_inventory] useItem failed for item: ' .. tostring(itemName))
-                                end
-                            end, itemName, i - 1)
+                            -- Si c'est un item normal (pain, etc.)
+                            ESX.TriggerServerCallback('esx_inventory:useItem', function(success) end, itemName, slotIndex - 1)
                         end
                     end
                 end
             end
         end
     end
-end)
+end)    
 
 -- ─── Vehicle Item Logic ───────────────────────────────────
 local spawnedVehicle = nil
@@ -315,28 +389,67 @@ AddEventHandler('esx_inventory:spawnVehicle', function(model)
 end)
 
 -- Listener for K key (311) to return vehicle
+-- Listener for K key (311) to return vehicle
 Citizen.CreateThread(function()
     while true do
         Citizen.Wait(0)
         
-        if IsControlJustReleased(0, 311) then -- K key
-            if spawnedVehicle and DoesEntityExist(spawnedVehicle) then
+        -- On vérifie si la touche K est relâchée ET si l'inventaire n'est pas ouvert
+        if IsControlJustReleased(0, 311) and not isOpen then 
+            if spawnedVehicle ~= nil and DoesEntityExist(spawnedVehicle) then
                 local playerPed = PlayerPedId()
+                local vehCoords = GetEntityCoords(spawnedVehicle)
+                local playerCoords = GetEntityCoords(playerPed)
                 
-                -- Check if player is near or inside the vehicle to store it
-                local dist = #(GetEntityCoords(playerPed) - GetEntityCoords(spawnedVehicle))
-                if dist < 5.0 or GetVehiclePedIsIn(playerPed, false) == spawnedVehicle then
+                -- Calcul de la distance
+                local dist = #(playerCoords - vehCoords)
+                
+                -- Check si proche ou à l'intérieur
+                if dist < 10.0 or GetVehiclePedIsIn(playerPed, false) == spawnedVehicle then
                     
+                    -- 1. Sauvegarde du modèle avant suppression
+                    local modelToReturn = spawnedVehicleModel or "deluxo"
+                    
+                    -- 2. Suppression propre du véhicule
                     ESX.Game.DeleteVehicle(spawnedVehicle)
-                    spawnedVehicle = nil
                     
-                    if spawnedVehicleModel then
-                        TriggerServerEvent('esx_inventory:returnVehicleItem', spawnedVehicleModel)
-                        spawnedVehicleModel = nil
-                    else
-                        TriggerServerEvent('esx_inventory:returnVehicleItem', 'deluxo') -- fallback
-                    end
+                    -- 3. RESET IMMÉDIAT des variables locales (Crucial pour pouvoir respawn)
+                    spawnedVehicle = nil
+                    spawnedVehicleModel = nil
+                    
+                    -- 4. Notification Serveur pour rendre l'item
+                    TriggerServerEvent('esx_inventory:returnVehicleItem', modelToReturn)
+                    
                     ESX.ShowNotification('~g~Véhicule rangé dans votre inventaire !')
+
+                    -- 5. SYNCHRONISATION NUI : 
+                    -- On attend un court instant que le serveur traite l'ajout de l'item
+                    -- puis on demande un rafraîchissement complet
+                    Citizen.SetTimeout(500, function()
+                        local playerData = ESX.GetPlayerData()
+                        if playerData and playerData.inventory then
+                            local inventory = {}
+                            for _, item in ipairs(playerData.inventory) do
+                                if item.count > 0 then
+                                    table.insert(inventory, {
+                                        name = item.name,
+                                        label = item.label,
+                                        count = item.count,
+                                        weight = item.weight or 0.1,
+                                        description = item.description or ''
+                                    })
+                                end
+                            end
+
+                            -- On renvoie l'inventaire frais au JS pour éviter que 
+                            -- l'item ne disparaisse visuellement de la hotbar
+                            SendNUIMessage({
+                                action = 'updateInventory',
+                                inventory = inventory,
+                                container = CustomContainer
+                            })
+                        end
+                    end)
                 else
                     ESX.ShowNotification('~r~Vous êtes trop loin de votre véhicule.')
                 end

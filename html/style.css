@@ -364,6 +364,27 @@ body {
     pointer-events: none !important;
 }
 
+.hotbar-drag-preview {
+    position: fixed !important;
+    z-index: 99999 !important;
+    pointer-events: none !important;
+    opacity: 0.85;
+    background: rgba(20, 20, 20, 0.9) !important;
+    border: 1px solid #444 !important;
+    border-radius: 3px !important;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+}
+
+/* On cache le numéro de touche sur la preview pour que ce soit propre */
+.hotbar-drag-preview .shortkey-number {
+    display: none !important;
+}
+
 /* ─── Item Content ────────────────────────────────────────── */
 .item-image {
     width: 90%;
@@ -420,6 +441,12 @@ body {
 
 .hotbar-slots .sortable-ghost {
     display: none !important;
+}
+
+/* Preview du drag depuis la hotbar — donne des dimensions au clone hors du parent flex */
+.shortkey-slot.sortable-drag {
+    width: 150px !important;
+    height: 68px !important;
 }
 
 .shortkey-slot {

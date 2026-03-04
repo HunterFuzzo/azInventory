@@ -240,14 +240,26 @@
         dom.bagGrid.replaceChildren(frag);
         updateWeightDisplay();
     }
-
     function renderContainer() {
         const frag = document.createDocumentFragment();
-        const totalSlots = 12;
-        for (let i = 0; i < totalSlots; i++) {
-            const item = state.containerItems[i] || null;
-            frag.appendChild(createItemSlot(item, 'container', i));
+        const totalVisibleSlots = 12;
+
+        // On affiche uniquement les items réels à la suite (Index dynamique)
+        state.containerItems.forEach((item, i) => {
+            if (item) {
+                frag.appendChild(createItemSlot(item, 'container', i));
+            }
+        });
+
+        // On remplit le reste avec des slots vides
+        for (let i = state.containerItems.length; i < totalVisibleSlots; i++) {
+            const emptySlot = document.createElement('div');
+            emptySlot.className = 'item-slot empty';
+            emptySlot.dataset.zone = 'container';
+            emptySlot.dataset.index = i;
+            frag.appendChild(emptySlot);
         }
+
         dom.containerGrid.replaceChildren(frag);
     }
 
@@ -446,88 +458,154 @@
         const sortableOpts = {
             group: { name: 'inventory', pull: true, put: true },
             animation: 200,
+            sort: false,
             ghostClass: 'sortable-ghost',
             chosenClass: 'sortable-chosen',
             dragClass: 'sortable-drag',
             forceFallback: true,
+            fallbackOnBody: true,
             filter: '.empty',
+
             onAdd: function (evt) {
                 const droppedEl = evt.item;
                 const itemName = droppedEl.dataset.itemName;
                 const toZone = evt.to.id === 'bag-grid' ? 'bag' : 'container';
-                let fromZone = evt.from.id === 'bag-grid' ? 'bag' : evt.from.id === 'container-grid' ? 'container' : 'shortkeys';
+                let fromZone = evt.from.id === 'container-grid' ? 'container' :
+                    evt.from.id === 'shortkeys-slots' ? 'shortkeys' : 'bag';
 
-                droppedEl.style.display = 'none'; // Cache l'élément cloné par Sortable
+                droppedEl.style.display = 'none';
 
                 if (!itemName || !canFitItem(itemName, toZone)) {
                     setTimeout(() => { renderAll(); initSortable(); }, 10);
                     return;
                 }
 
-                // Logique de transfert (Bag <-> Container)
-                if (fromZone === 'shortkeys' || fromZone === 'bag') {
-                    if (toZone === 'container') {
-                        const depleted = moveOneItem(itemName, state.bagItems, state.containerItems);
-                        if (depleted) {
-                            const skIdx = state.shortkeyItems.findIndex(i => i && i.name === itemName);
-                            if (skIdx !== -1) {
-                                state.shortkeyItems[skIdx] = null;
-                                postNUI('setShortkey', { slot: skIdx, item: null });
-                            }
+                // Transfert Bag/Hotbar -> Container
+                if ((fromZone === 'bag' || fromZone === 'shortkeys') && toZone === 'container') {
+                    const depleted = moveOneItem(itemName, state.bagItems, state.containerItems);
+                    if (depleted) {
+                        const skIdx = state.shortkeyItems.findIndex(i => i && i.name === itemName);
+                        if (skIdx !== -1) {
+                            state.shortkeyItems[skIdx] = null;
+                            postNUI('setShortkey', { slot: skIdx, item: null });
                         }
-                        postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: itemName, count: 1 });
                     }
-                } else if (fromZone === 'container' && toZone === 'bag') {
+                    postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: itemName, count: 1 });
+                }
+                // Transfert Container -> Bag
+                else if (fromZone === 'container' && toZone === 'bag') {
                     moveOneItem(itemName, state.containerItems, state.bagItems);
                     postNUI('moveItem', { fromZone: 'container', toZone: 'bag', item: itemName, count: 1 });
                 }
 
                 setTimeout(() => {
                     renderAll();
-                    initSortable(); // 🟢 On relance les instances APRES le rendu
-                }, 10);
+                    initSortable();
+                }, 20);
             },
+
             onMove: function (evt) {
                 clearDragOver();
-                if (evt.to === dom.shortkeysSlots && evt.related) {
+
+                // Bloquer le réordonnancement (le fait que les items s'écartent)
+                // Si on bouge un item dans SA PROPRE grille, on interdit le swap.
+                if (evt.from === evt.to) {
+                    return false;
+                }
+
+                // Pour la Hotbar
+                if (evt.to.id === 'shortkeys-slots' && evt.related) {
                     const slot = evt.related.closest('.shortkey-slot') || evt.related;
                     if (slot && slot.classList.contains('shortkey-slot')) {
                         slot.classList.add('drag-over');
                     }
                 }
             },
+
             onEnd: function (evt) {
                 clearDragOver();
+                _cleanupHotbarDrag();
                 handleDragEnd(evt);
             }
         };
 
         bagSortable = new Sortable(dom.bagGrid, sortableOpts);
         containerSortable = new Sortable(dom.containerGrid, sortableOpts);
-        initSortableShortkeys(); // Initialise la hotbar
+        initSortableShortkeys();
+    }
+
+    // Track custom drag clone for hotbar
+    let _hotbarDragClone = null;
+    let _hotbarMouseHandler = null;
+
+    function _cleanupHotbarDrag() {
+        if (_hotbarDragClone) {
+            _hotbarDragClone.remove();
+            _hotbarDragClone = null;
+        }
+        if (_hotbarMouseHandler) {
+            document.removeEventListener('mousemove', _hotbarMouseHandler);
+            _hotbarMouseHandler = null;
+        }
+        const dummy = document.getElementById('drag-dummy-slot');
+        if (dummy) dummy.remove();
     }
 
     function initSortableShortkeys() {
-        // 1. On détruit proprement l'ancienne instance avant d'en créer une nouvelle
         if (shortkeySortable) {
             shortkeySortable.destroy();
             shortkeySortable = null;
         }
 
         shortkeySortable = new Sortable(dom.shortkeysSlots, {
-            group: {
-                name: 'inventory',
-                pull: true,
-                put: true,
-            },
+            group: { name: 'inventory', pull: true, put: true },
             animation: 0,
             sort: false,
             ghostClass: 'sortable-ghost',
             chosenClass: 'sortable-chosen',
             dragClass: 'sortable-drag',
-            forceFallback: false,
+            forceFallback: true,
+            filter: '.empty',
             onStart: function (evt) {
-                // Création du dummy pour garder la structure à 6 colonnes
+                const dragEl = evt.item;
+                const rect = dragEl.getBoundingClientRect();
+
+                // 1. Create our own clone and append to body
+                _hotbarDragClone = dragEl.cloneNode(true);
+                _hotbarDragClone.className = 'hotbar-drag-preview';
+                // Set fixed dimensions matching the slot
+                _hotbarDragClone.style.width = rect.width + 'px';
+                _hotbarDragClone.style.height = rect.height + 'px';
+                _hotbarDragClone.style.left = rect.left + 'px';
+                _hotbarDragClone.style.top = rect.top + 'px';
+                document.body.appendChild(_hotbarDragClone);
+
+                // 2. Follow mouse, centered on cursor
+                const halfW = rect.width / 2;
+                const halfH = rect.height / 2;
+                _hotbarMouseHandler = (e) => {
+                    if (_hotbarDragClone) {
+                        _hotbarDragClone.style.left = (e.clientX - halfW) + 'px';
+                        _hotbarDragClone.style.top = (e.clientY - halfH) + 'px';
+                    }
+                };
+                document.addEventListener('mousemove', _hotbarMouseHandler);
+
+                // 3. Hide SortableJS's fallback clone (it's mispositioned)
+                requestAnimationFrame(() => {
+                    // The fallback clone gets sortable-drag class, find and hide it
+                    const fallbacks = document.querySelectorAll('.sortable-drag');
+                    fallbacks.forEach(el => {
+                        if (el !== dragEl && el !== _hotbarDragClone) {
+                            el.style.opacity = '0';
+                            el.style.width = '0';
+                            el.style.height = '0';
+                            el.style.overflow = 'hidden';
+                        }
+                    });
+                });
+
+                // 4. Insert dummy to keep 6-column layout
                 const dummy = document.createElement('div');
                 dummy.className = 'shortkey-slot';
                 dummy.id = 'drag-dummy-slot';
@@ -539,13 +617,12 @@
                 const itemName = droppedEl.dataset.itemName;
                 let targetIndex = evt.newIndex;
 
-                // Calcul précis de l'index cible (pour éviter les décalages FiveM/CEF)
                 if (evt.originalEvent) {
                     const e = evt.originalEvent;
                     const cX = e.clientX || (e.changedTouches ? e.changedTouches[0].clientX : 0);
                     const cY = e.clientY || (e.changedTouches ? e.changedTouches[0].clientY : 0);
 
-                    droppedEl.style.display = 'none'; // Cache temporairement pour voir dessous
+                    droppedEl.style.display = 'none';
                     const elemBelow = document.elementFromPoint(cX, cY);
 
                     if (elemBelow) {
@@ -556,34 +633,28 @@
                     }
                 }
 
-                // Sécurité sur l'index
                 if (targetIndex === undefined || targetIndex >= state.shortkeyItems.length) {
                     targetIndex = evt.newIndex;
                 }
 
-                // 2. IMPORTANT : On cache l'élément cloné par Sortable car renderAll va créer le vrai
                 droppedEl.style.display = 'none';
 
                 if (itemName) {
-                    // On cherche les infos de l'item dans le sac ou le coffre
                     const allSourceItems = [...state.bagItems, ...state.containerItems];
                     const itemData = allSourceItems.find(i => i && i.name === itemName);
 
-                    // Mise à jour du state
                     state.shortkeyItems[targetIndex] = itemData
                         ? { ...itemData }
                         : { name: itemName, label: itemName.replace(/_/g, ' '), count: 1, weight: 0 };
 
-                    // Notification au serveur/client Lua
                     postNUI('setShortkey', { slot: targetIndex, item: itemName });
                 }
 
                 clearDragOver();
+                _cleanupHotbarDrag();
 
-                // 3. On diffère le rendu pour laisser SortableJS finir son cycle interne
                 setTimeout(() => {
                     renderAll();
-                    // On ne rappelle pas initSortable ici car renderAll le fait déjà normalement
                 }, 20);
             },
             onMove: function (evt) {
@@ -595,10 +666,8 @@
             },
             onEnd: function (evt) {
                 clearDragOver();
-                const dummy = document.getElementById('drag-dummy-slot');
-                if (dummy) dummy.remove();
+                _cleanupHotbarDrag();
 
-                // Si on a simplement déplacé à l'intérieur ou sorti l'item
                 setTimeout(() => {
                     renderAll();
                 }, 20);

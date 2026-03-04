@@ -7,7 +7,8 @@ version '1.0.0'
 
 shared_scripts {
     '@es_extended/imports.lua',
-    '@oxmysql/lib/MySQL.lua'
+    '@oxmysql/lib/MySQL.lua',
+    'config.lua'
 }
 
 client_scripts {
