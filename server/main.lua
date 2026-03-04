@@ -248,6 +248,7 @@ ESX.RegisterServerCallback('esx_inventory:useItem', function(source, cb, itemNam
 
     -- Anti-dupe : vérifier que le joueur n'est pas en train de faire autre chose
     if not lockPlayer(source) then
+        print(('[esx_inventory] %s tried to use %s but is locked'):format(xPlayer.getName(), itemName))
         cb(false)
         return
     end
@@ -255,10 +256,12 @@ ESX.RegisterServerCallback('esx_inventory:useItem', function(source, cb, itemNam
     -- Le serveur vérifie lui-même la possession réelle de l'item
     local item = xPlayer.getInventoryItem(itemName)
     if item and item.count > 0 then
+        print(('[esx_inventory] %s using item %s via useItem'):format(xPlayer.getName(), itemName))
         xPlayer.useItem(itemName)
         unlockPlayer(source)
         cb(true)
     else
+        print(('[esx_inventory] %s failed to use item %s (not enough count or not found)'):format(xPlayer.getName(), itemName))
         unlockPlayer(source)
         cb(false)
     end
@@ -359,24 +362,67 @@ ESX.RegisterServerCallback('esx_inventory:giveItem', function(source, cb, itemNa
     end
 end)
 
--- ─── Vehicle Items ────────────────────────────────────────
--- Whitelist des modèles autorisés comme items
-local allowedVehicleItems = { deluxo = true }
+-- ─── Vehicle & Weapon Items ───────────────────────────────
+-- Whitelist des modèles autorisés comme items (véhicules)
+local allowedVehicleItems = { 
+    deluxo = true,
+    zentorno = true,
+    t20 = true,
+    sanchez = true,
+    bmx = true
+}
 
-ESX.RegisterUsableItem('deluxo', function(source)
-    if not lockPlayer(source) then return end
+for model, _ in pairs(allowedVehicleItems) do
+    ESX.RegisterUsableItem(model, function(source)
+        print(('[esx_inventory] Usable item triggered for vehicle: %s (source: %s)'):format(model, source))
+        -- We do NOT call lockPlayer here because esx_inventory:useItem ALREADY locks the player 
+        -- before triggering ESX.UseItem, which invokes this callback. Double-locking causes failure!
+        
+        local xPlayer = ESX.GetPlayerFromId(source)
+        -- Vérification serveur : le joueur possède-t-il vraiment l'item ?
+        local item = xPlayer.getInventoryItem(model)
+        if not item or item.count < 1 then
+            print('[esx_inventory] Failed to spawn vehicle: player does not have item ' .. model)
+            return
+        end
 
-    local xPlayer = ESX.GetPlayerFromId(source)
-    -- Vérification serveur : le joueur possède-t-il vraiment l'item ?
-    local item = xPlayer.getInventoryItem('deluxo')
-    if not item or item.count < 1 then
-        unlockPlayer(source)
-        return
-    end
+        xPlayer.removeInventoryItem(model, 1)
+        TriggerClientEvent('esx_inventory:spawnVehicle', source, model)
+        print('[esx_inventory] Vehicle spawned successfully: ' .. model)
+    end)
+end
 
-    xPlayer.removeInventoryItem('deluxo', 1)
-    TriggerClientEvent('esx_inventory:spawnVehicle', source, 'deluxo')
-    unlockPlayer(source)
+-- Weapons as items: register usable items for all WEAPON_* items
+-- When used, trigger a client event to give the weapon to the ped physically
+MySQL.ready(function()
+    MySQL.query('SELECT name FROM items WHERE name LIKE "WEAPON_%"', {}, function(result)
+        for i=1, #result do
+            local weaponName = result[i].name
+            ESX.RegisterUsableItem(weaponName, function(source)
+                local xPlayer = ESX.GetPlayerFromId(source)
+                if not xPlayer then return end
+
+                -- Vérification serveur : le joueur possède bien l'arme en item
+                local item = xPlayer.getInventoryItem(weaponName)
+                if not item or item.count < 1 then
+                    print(('[esx_inventory] %s tried to use weapon item %s but does not have it'):format(xPlayer.getName(), weaponName))
+                    return
+                end
+
+                -- Donner l'arme physiquement au ped côté client
+                print(('[esx_inventory] Giving weapon %s physically to %s'):format(weaponName, xPlayer.getName()))
+                TriggerClientEvent('esx_inventory:giveWeaponToPed', source, weaponName)
+            end)
+        end
+    end)
+end)
+
+-- Retirer physiquement une arme du ped (dé-équipement)
+RegisterNetEvent('esx_inventory:removeWeaponFromPed')
+AddEventHandler('esx_inventory:removeWeaponFromPed', function(weaponName)
+    -- Validation basique : seulement accepter des noms WEAPON_*
+    if type(weaponName) ~= 'string' or string.sub(string.upper(weaponName), 1, 7) ~= 'WEAPON_' then return end
+    TriggerClientEvent('esx_inventory:removeWeaponFromPed', source, weaponName)
 end)
 
 RegisterNetEvent('esx_inventory:returnVehicleItem')

@@ -195,18 +195,24 @@ body {
     min-height: 0;
 }
 
-/* PROTECTED CONTAINER = two rows */
-#section-container .item-grid {
-    display: flex;
-    gap: 4px;
-    flex-wrap: wrap;
+/* PROTECTED CONTAINER : hauteur bloquée sur exactement 2 lignes */
+#section-container {
+    flex: 0 0 auto;
     overflow: hidden;
 }
 
-#section-container .item-slot {
+/* PROTECTED CONTAINER = exactly two rows, never more */
+#section-container .item-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    grid-template-rows: repeat(2, auto);
+    /* 2 lignes explicites = hauteur naturelle */
+    grid-auto-rows: 0px;
+    /* Toute ligne implicite (ghost SortableJS) = 0px */
+    gap: 4px;
+    overflow: hidden;
+    /* Clip le ghost qui déborde */
     flex: 0 0 auto;
-    width: calc(100% / 6 - 4px);
-    max-width: calc(100% / 6 - 4px);
 }
 
 .inv-section--hotbar {
@@ -337,12 +343,9 @@ body {
 
 .item-slot.sortable-ghost,
 .sortable-ghost {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    border: none !important;
+    opacity: 0.1 !important;
+    border: 1px dashed rgba(255, 255, 255, 0.3) !important;
+    background: transparent !important;
 }
 
 .item-slot.sortable-chosen {
@@ -351,13 +354,14 @@ body {
     z-index: 100;
 }
 
-.item-slot.sortable-drag {
+.item-slot.sortable-drag,
+.sortable-drag {
     opacity: 1 !important;
     background: rgba(20, 20, 20, 0.9);
     border: 1px solid #444;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
-    transform: scale(1.05);
-    z-index: 9999;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6) !important;
+    z-index: 9999 !important;
+    pointer-events: none !important;
 }
 
 /* ─── Item Content ────────────────────────────────────────── */
@@ -444,6 +448,12 @@ body {
     border-color: var(--border-slot);
     background: var(--bg-slot);
     cursor: default;
+}
+
+/* Slot being hovered during drag — shows it will be replaced */
+.shortkey-slot.drag-over {
+    border-color: rgba(255, 255, 255, 0.6) !important;
+    background: rgba(255, 255, 255, 0.08) !important;
 }
 
 .shortkey-slot.has-item {
