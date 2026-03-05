@@ -246,6 +246,7 @@ ESX.RegisterServerCallback('az_inventory:pickupBag', function(source, cb, bagId)
         if CanCarryWeight(xPlayer, totalWeight) then
             for _, item in ipairs(bag.items) do
                 xPlayer.addInventoryItem(item.name, item.count)
+                TriggerClientEvent('az_inventory:refreshInventoryUI', source)
             end
 
             -- On supprime le sac du serveur et des clients

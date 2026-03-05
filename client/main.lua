@@ -131,6 +131,8 @@ Citizen.CreateThread(function()
             DisableControlAction(0, 25, true)
             DisableControlAction(0, 140, true)
             
+            EnableControlAction(0, 38, true)
+
             -- /!\ IMPORTANT : On bloque la touche TAB (37) en boucle quand c'est ouvert
             -- pour éviter que le jeu ne l'interprète comme "maintenir la roue des armes"
             DisableControlAction(0, 37, true) 
@@ -563,3 +565,10 @@ function pickupBag(bagId)
         end
     end, bagId)
 end
+
+RegisterNetEvent('az_inventory:refreshInventoryUI')
+AddEventHandler('az_inventory:refreshInventoryUI', function()
+    if isOpen then
+        RefreshInventoryNUI()
+    end
+end)
