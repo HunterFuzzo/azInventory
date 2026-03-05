@@ -457,3 +457,50 @@ Citizen.CreateThread(function()
         end
     end
 end)
+
+local bagsOnGround = {}
+
+RegisterNetEvent('esx_inventory:spawnBagProp')
+AddEventHandler('esx_inventory:spawnBagProp', function(bagId, coords)
+    local model = `prop_big_bag_01`
+    RequestModel(model)
+    while not HasModelLoaded(model) do Wait(0) end
+
+    local obj = CreateObject(model, coords.x, coords.y, coords.z - 1.0, false, false, false)
+    PlaceObjectOnGroundProperly(obj)
+    FreezeEntityPosition(obj, true)
+
+    bagsOnGround[bagId] = obj
+end)
+
+-- Boucle de détection de la touche E
+Citizen.CreateThread(function()
+    while true do
+        local sleep = 1000
+        local playerCoords = GetEntityCoords(PlayerPedId())
+
+        for bagId, entity in pairs(bagsOnGround) do
+            local bagCoords = GetEntityCoords(entity)
+            local dist = #(playerCoords - bagCoords)
+
+            if dist < 2.0 then
+                sleep = 0
+                ESX.ShowHelpNotification("Appuyez sur ~INPUT_CONTEXT~ pour ramasser le sac")
+                if IsControlJustReleased(0, 38) then -- Touche E
+                    TriggerServerEvent('esx_inventory:pickupBag', bagId)
+                end
+            end
+        end
+        Wait(sleep)
+    end
+end)
+
+RegisterNetEvent('esx_inventory:removeBagProp')
+AddEventHandler('esx_inventory:removeBagProp', function(bagId)
+    if bagsOnGround[bagId] then
+        -- Supprime l'objet physiquement
+        DeleteEntity(bagsOnGround[bagId])
+        -- Enlève la référence de la liste
+        bagsOnGround[bagId] = nil
+    end
+end)

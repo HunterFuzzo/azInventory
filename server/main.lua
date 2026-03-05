@@ -523,13 +523,63 @@ AddEventHandler('esx_inventory:removeWeaponFromPed', function(itemName)
     TriggerClientEvent('esx_inventory:removeWeaponFromPed', source, itemName)
 end)
 
--- ─── Weight Info Command ──────────────────────────────────
-RegisterCommand('myweight', function(source)
-    local xPlayer = ESX.GetPlayerFromId(source)
-    if xPlayer then
-        local w = GetPlayerCurrentWeight(xPlayer)
-        xPlayer.showNotification(('~b~Weight: %.1f / %d KG'):format(w, Config.MaxWeight))
-    end
-end, false)
-
 print('[esx_inventory] Server script loaded successfully')
+
+-- Table pour stocker les sacs au sol temporairement
+local groundBags = {}
+
+RegisterNetEvent('esx:onPlayerDeath')
+AddEventHandler('esx:onPlayerDeath', function(data)
+    local xPlayer = ESX.GetPlayerFromId(source)
+    local coords = GetEntityCoords(GetPlayerPed(source))
+    local inventory = xPlayer.getInventory()
+    local itemsToDrop = {}
+
+    -- On récupère tout ce qui est dans l'inventaire
+    for i=1, #inventory do
+        if inventory[i].count > 0 then
+            table.insert(itemsToDrop, {
+                name = inventory[i].name,
+                count = inventory[i].count,
+                label = inventory[i].label
+            })
+            -- On retire l'item du joueur
+            xPlayer.removeInventoryItem(inventory[i].name, inventory[i].count)
+        end
+    end
+
+    if #itemsToDrop > 0 then
+        local bagId = math.random(1000, 9999)
+        groundBags[bagId] = itemsToDrop
+        
+        -- On prévient les clients qu'un sac est apparu
+        TriggerClientEvent('esx_inventory:spawnBagProp', -1, bagId, coords)
+    end
+end)
+
+RegisterNetEvent('esx_inventory:pickupBag')
+AddEventHandler('esx_inventory:pickupBag', function(bagId)
+    local xPlayer = ESX.GetPlayerFromId(source)
+    local items = groundBags[bagId]
+
+    if items then
+        local summary = "Vous avez ramassé : "
+        
+        for i, item in ipairs(items) do
+            -- On ajoute l'item au joueur
+            xPlayer.addInventoryItem(item.name, item.count)
+            
+            -- On construit le message de notification
+            summary = summary .. "\n- " .. item.count .. "x " .. item.label
+        end
+        
+        -- On supprime les données du serveur pour éviter le double ramassage
+        groundBags[bagId] = nil
+        
+        -- On envoie la notification détaillée
+        xPlayer.showNotification(summary)
+        
+        -- On ordonne à TOUS les clients de supprimer le prop visuel
+        TriggerClientEvent('esx_inventory:removeBagProp', -1, bagId)
+    end
+end)
