@@ -496,3 +496,70 @@ AddEventHandler('az_inventory:removeBagProp', function(bagId)
         bagsOnGround[bagId] = nil
     end
 end)
+
+local spawnedBags = {} -- Stocke les objets (props) des sacs
+local nearbyBag = nil  -- Stocke l'ID du sac le plus proche
+
+-- 1. Réception de l'ordre de spawn du serveur
+RegisterNetEvent('az_inventory:spawnBagProp')
+AddEventHandler('az_inventory:spawnBagProp', function(bagId, coords)
+    local model = `prop_paper_bag_01` -- Tu peux changer par 'p_ld_bag_01' pour un sac de sport
+    
+    RequestModel(model)
+    while not HasModelLoaded(model) do Wait(0) end
+
+    local obj = CreateObject(model, coords.x, coords.y, coords.z - 0.98, false, false, false)
+    PlaceObjectOnGroundProperly(obj)
+    FreezeEntityPosition(obj, true)
+    SetEntityAsMissionEntity(obj, true, true)
+
+    spawnedBags[bagId] = {obj = obj, coords = coords}
+end)
+
+-- 2. Suppression du sac quand il est ramassé
+RegisterNetEvent('az_inventory:removeBagProp')
+AddEventHandler('az_inventory:removeBagProp', function(bagId)
+    if spawnedBags[bagId] then
+        DeleteEntity(spawnedBags[bagId].obj)
+        spawnedBags[bagId] = nil
+    end
+end)
+
+-- 3. Boucle de détection de proximité et touche E
+Citizen.CreateThread(function()
+    while true do
+        local sleep = 1000
+        local playerCoords = GetEntityCoords(PlayerPedId())
+        nearbyBag = nil
+
+        for bagId, data in pairs(spawnedBags) do
+            local dist = #(playerCoords - data.coords)
+            
+            if dist < 3.0 then
+                sleep = 0
+                nearbyBag = bagId -- On mémorise quel sac est proche
+                
+                -- Affichage du texte 3D ou de l'aide
+                ESX.ShowHelpNotification("Appuyez sur ~INPUT_CONTEXT~ pour ramasser le sac")
+
+                -- Détection de la touche E (INPUT_CONTEXT)
+                if IsControlJustReleased(0, 38) then 
+                    pickupBag(bagId)
+                end
+            end
+        end
+        Wait(sleep)
+    end
+end)
+
+-- 4. Fonction qui appelle le serveur pour ramasser
+function pickupBag(bagId)
+    ESX.TriggerServerCallback('az_inventory:pickupBag', function(success)
+        if success then
+            -- Le serveur enverra l'event removeBagProp à tout le monde
+            ESX.ShowNotification("~g~Sac ramassé !")
+        else
+            ESX.ShowNotification("~r~Impossible de ramasser ce sac.")
+        end
+    end, bagId)
+end
