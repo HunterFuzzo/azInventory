@@ -19,8 +19,8 @@ local CustomShortkeys = {}
 local currentWeapon = nil -- Track the currently equipped weapon from shortkey
 
 -- Receive data from server on load
-RegisterNetEvent('esx_inventory:loadCustomData')
-AddEventHandler('esx_inventory:loadCustomData', function(container, shortkeys)
+RegisterNetEvent('az_inventory:loadCustomData')
+AddEventHandler('az_inventory:loadCustomData', function(container, shortkeys)
     CustomContainer = container or {}
     CustomShortkeys = shortkeys or {}
 end)
@@ -34,7 +34,7 @@ function OpenInventory()
 
     isOpen = true
     SetNuiFocus(true, true)
-
+    SetNuiFocusKeepInput(true)
     -- Build inventory data with weights
     local inventory = {}
     for _, item in ipairs(playerData.inventory) do
@@ -102,22 +102,18 @@ function CloseInventory()
     if not isOpen then return end
     isOpen = false
     SetNuiFocus(false, false)
+    SetNuiFocusKeepInput(false)
 end
 
 -- ─── Key Binding (TAB) ───────────────────────────────────
 Citizen.CreateThread(function()
     while true do
-        Citizen.Wait(0)
+        local sleep = 0
         
-        -- Only disable the weapon wheel
-        DisableControlAction(0, 37, true)
-        DisableControlAction(0, 192, true)
-        DisableControlAction(0, 204, true)
-        DisableControlAction(0, 211, true)
-        DisableControlAction(0, 349, true)
-        
-        -- Override TAB key to toggle inventory manually
-        if IsDisabledControlJustReleased(0, 37) then -- TAB key
+        -- Bloque la roue des armes native (TAB) même si l'inventaire est fermé
+        DisableControlAction(0, 37, true) 
+
+        if IsDisabledControlJustPressed(0, 37) then -- On utilise JUST PRESSED pour le Toggle
             if isOpen then
                 CloseInventory()
                 SendNUIMessage({ action = 'closeInventory' })
@@ -126,25 +122,21 @@ Citizen.CreateThread(function()
             end
         end
 
-        -- Disable controls while inventory is open
         if isOpen then
-            DisableControlAction(0, 1, true)   -- LookLeftRight
-            DisableControlAction(0, 2, true)   -- LookUpDown
-            DisableControlAction(0, 24, true)  -- Attack
-            DisableControlAction(0, 25, true)  -- Aim
-            DisableControlAction(0, 30, true)  -- MoveLeftRight
-            DisableControlAction(0, 31, true)  -- MoveUpDown
-            DisableControlAction(0, 36, true)  -- Duck
-            DisableControlAction(0, 44, true)  -- Cover
-            DisableControlAction(0, 47, true)  -- Detonate
-            DisableControlAction(0, 58, true)  -- Throw Grenade
-            DisableControlAction(0, 140, true) -- Melee Light
-            DisableControlAction(0, 141, true) -- Melee Heavy
-            DisableControlAction(0, 142, true) -- Melee Alternate
-            DisableControlAction(0, 143, true) -- Melee Block
-            DisableControlAction(0, 257, true) -- Attack2
-            DisableControlAction(0, 263, true) -- Melee Attack1
+            -- On bloque la souris pour pas que la caméra tourne
+            DisableControlAction(0, 1, true) 
+            DisableControlAction(0, 2, true)
+            -- On bloque les actions de combat
+            DisableControlAction(0, 24, true) 
+            DisableControlAction(0, 25, true)
+            DisableControlAction(0, 140, true)
+            
+            -- /!\ IMPORTANT : On bloque la touche TAB (37) en boucle quand c'est ouvert
+            -- pour éviter que le jeu ne l'interprète comme "maintenir la roue des armes"
+            DisableControlAction(0, 37, true) 
         end
+        
+        Citizen.Wait(sleep)
     end
 end)
 
@@ -159,11 +151,11 @@ end)
 -- Move item between zones
 RegisterNUICallback('moveItem', function(data, cb)
     if currentWeapon and data.item == currentWeapon and data.fromZone == 'bag' then
-        TriggerEvent('esx_inventory:removeWeaponFromPed', currentWeapon)
+        TriggerEvent('az_inventory:removeWeaponFromPed', currentWeapon)
         ESX.ShowNotification('~y~Arme déséquipée automatiquement.')
     end
 
-    ESX.TriggerServerCallback('esx_inventory:moveItem', function(success, updatedContainer)
+    ESX.TriggerServerCallback('az_inventory:moveItem', function(success, updatedContainer)
         if success then
             if updatedContainer then 
                 CustomContainer = updatedContainer 
@@ -196,7 +188,7 @@ end)
 
 -- Use item
 RegisterNUICallback('useItem', function(data, cb)
-    ESX.TriggerServerCallback('esx_inventory:useItem', function(success)
+    ESX.TriggerServerCallback('az_inventory:useItem', function(success)
         if success then
             TriggerEvent('esx:onPlayerData', ESX.GetPlayerData())
         end
@@ -207,11 +199,11 @@ end)
 -- Drop item
 RegisterNUICallback('dropItem', function(data, cb)
     if currentWeapon and data.item == currentWeapon then
-        TriggerEvent('esx_inventory:removeWeaponFromPed', currentWeapon)
+        TriggerEvent('az_inventory:removeWeaponFromPed', currentWeapon)
         ESX.ShowNotification('~y~Arme déséquipée automatiquement.')
     end
 
-    ESX.TriggerServerCallback('esx_inventory:dropItem', function(success)
+    ESX.TriggerServerCallback('az_inventory:dropItem', function(success)
         if success then
             local playerData = ESX.GetPlayerData()
             local inventory = {}
@@ -238,11 +230,11 @@ end)
 -- Give item
 RegisterNUICallback('giveItem', function(data, cb)
     if currentWeapon and data.item == currentWeapon then
-        TriggerEvent('esx_inventory:removeWeaponFromPed', currentWeapon)
+        TriggerEvent('az_inventory:removeWeaponFromPed', currentWeapon)
         ESX.ShowNotification('~y~Arme déséquipée automatiquement.')
     end
 
-    ESX.TriggerServerCallback('esx_inventory:giveItem', function(success)
+    ESX.TriggerServerCallback('az_inventory:giveItem', function(success)
         cb({ success = success })
     end, data.item, data.count)
 end)
@@ -277,14 +269,14 @@ RegisterNUICallback('setShortkey', function(data, cb)
         CustomShortkeys[slotIndex] = data.item
     end
     
-    TriggerServerEvent('esx_inventory:setShortkey', data.slot, data.item)
+    TriggerServerEvent('az_inventory:setShortkey', data.slot, data.item)
     cb('ok')
 end)
 -- ─── Weapon & Shortkey Usage (1-5 keys) ───────────────────
 
 -- Reçu du serveur : donner physiquement l'arme au ped et l'équiper
-RegisterNetEvent('esx_inventory:giveWeaponToPed')
-AddEventHandler('esx_inventory:giveWeaponToPed', function(itemName, actualWeaponName)
+RegisterNetEvent('az_inventory:giveWeaponToPed')
+AddEventHandler('az_inventory:giveWeaponToPed', function(itemName, actualWeaponName)
     local playerPed = PlayerPedId()
     local weaponToGive = actualWeaponName or itemName
     local weaponHash = GetHashKey(weaponToGive)
@@ -299,8 +291,8 @@ AddEventHandler('esx_inventory:giveWeaponToPed', function(itemName, actualWeapon
 end)
 
 -- Reçu du serveur : retirer physiquement l'arme du ped
-RegisterNetEvent('esx_inventory:removeWeaponFromPed')
-AddEventHandler('esx_inventory:removeWeaponFromPed', function(itemName)
+RegisterNetEvent('az_inventory:removeWeaponFromPed')
+AddEventHandler('az_inventory:removeWeaponFromPed', function(itemName)
     local playerPed = PlayerPedId()
     local actualWeaponName = itemName
     if Config and Config.WeaponItems and Config.WeaponItems[itemName] then
@@ -339,23 +331,23 @@ Citizen.CreateThread(function()
                                 -- Si on a déjà CETTE arme en main, on la range
                                 SetCurrentPedWeapon(playerPed, GetHashKey("WEAPON_UNARMED"), true)
                                 currentWeapon = nil
-                                print('[esx_inventory] Arme rangée (touche réappuyée)')
+                                print('[az_inventory] Arme rangée (touche réappuyée)')
                             else
                                 -- Sinon, on vérifie si le ped a l'arme et on l'équipe
                                 if HasPedGotWeapon(playerPed, weaponHash, false) then
                                     SetCurrentPedWeapon(playerPed, weaponHash, true)
                                     currentWeapon = itemName
-                                    print('[esx_inventory] Arme équipée : ' .. itemName)
+                                    print('[az_inventory] Arme équipée : ' .. itemName)
                                 else
                                     -- Si le ped ne l'a pas physiquement, on demande au serveur via useItem
-                                    ESX.TriggerServerCallback('esx_inventory:useItem', function(success)
+                                    ESX.TriggerServerCallback('az_inventory:useItem', function(success)
                                         if success then currentWeapon = itemName end
                                     end, itemName, slotIndex - 1)
                                 end
                             end
                         else
                             -- Si c'est un item normal (pain, etc.)
-                            ESX.TriggerServerCallback('esx_inventory:useItem', function(success) end, itemName, slotIndex - 1)
+                            ESX.TriggerServerCallback('az_inventory:useItem', function(success) end, itemName, slotIndex - 1)
                         end
                     end
                 end
@@ -368,8 +360,8 @@ end)
 local spawnedVehicle = nil
 local spawnedVehicleModel = nil -- Track the item name associated with the vehicle
 
-RegisterNetEvent('esx_inventory:spawnVehicle')
-AddEventHandler('esx_inventory:spawnVehicle', function(model)
+RegisterNetEvent('az_inventory:spawnVehicle')
+AddEventHandler('az_inventory:spawnVehicle', function(model)
     if spawnedVehicle and DoesEntityExist(spawnedVehicle) then
         ESX.ShowNotification('~r~Vous avez déjà un véhicule sorti !')
         return
@@ -418,7 +410,7 @@ Citizen.CreateThread(function()
                     spawnedVehicleModel = nil
                     
                     -- 4. Notification Serveur pour rendre l'item
-                    TriggerServerEvent('esx_inventory:returnVehicleItem', modelToReturn)
+                    TriggerServerEvent('az_inventory:returnVehicleItem', modelToReturn)
                     
                     ESX.ShowNotification('~g~Véhicule rangé dans votre inventaire !')
 
@@ -460,8 +452,8 @@ end)
 
 local bagsOnGround = {}
 
-RegisterNetEvent('esx_inventory:spawnBagProp')
-AddEventHandler('esx_inventory:spawnBagProp', function(bagId, coords)
+RegisterNetEvent('az_inventory:spawnBagProp')
+AddEventHandler('az_inventory:spawnBagProp', function(bagId, coords)
     local model = `prop_big_bag_01`
     RequestModel(model)
     while not HasModelLoaded(model) do Wait(0) end
@@ -487,7 +479,7 @@ Citizen.CreateThread(function()
                 sleep = 0
                 ESX.ShowHelpNotification("Appuyez sur ~INPUT_CONTEXT~ pour ramasser le sac")
                 if IsControlJustReleased(0, 38) then -- Touche E
-                    TriggerServerEvent('esx_inventory:pickupBag', bagId)
+                    TriggerServerEvent('az_inventory:pickupBag', bagId)
                 end
             end
         end
@@ -495,8 +487,8 @@ Citizen.CreateThread(function()
     end
 end)
 
-RegisterNetEvent('esx_inventory:removeBagProp')
-AddEventHandler('esx_inventory:removeBagProp', function(bagId)
+RegisterNetEvent('az_inventory:removeBagProp')
+AddEventHandler('az_inventory:removeBagProp', function(bagId)
     if bagsOnGround[bagId] then
         -- Supprime l'objet physiquement
         DeleteEntity(bagsOnGround[bagId])

@@ -1,5 +1,5 @@
 /* ============================================================
-   ESX Inventory – GLife Extinction Style
+   AZ Inventory – GLife Extinction Style
    Client-side NUI Script
    ============================================================ */
 
@@ -48,7 +48,7 @@
 
     // ─── Test Mode Detection ──────────────────────────────────
     const isTestMode = typeof GetParentResourceName === 'undefined';
-    const resourceName = isTestMode ? 'esx_inventory' : GetParentResourceName();
+    const resourceName = isTestMode ? 'az_inventory' : GetParentResourceName();
 
     // ─── Mock Data (Test Mode) ────────────────────────────────
     const MOCK_ITEMS = [
@@ -768,7 +768,7 @@
 
     // ─── Test Mode Bootstrap ──────────────────────────────────
     if (isTestMode) {
-        console.log('%c🎮 ESX Inventory – Test Mode', 'color: #e53935; font-size: 16px; font-weight: bold;');
+        console.log('%c🎮 AZ Inventory – Test Mode', 'color: #e53935; font-size: 16px; font-weight: bold;');
         console.log('%cPress [TAB] to toggle inventory', 'color: #9e9e9e;');
 
         // TAB key toggle
@@ -796,7 +796,7 @@
     }
 
     // Expose for external use + test commands
-    window.ESXInventory = {
+    window.AZInventory = {
         open: openInventory,
         close: closeInventory,
         state: state,
