@@ -250,6 +250,48 @@ body {
     flex: 0 0 auto;
 }
 
+/* --- STASH MODE OVERRIDES --- */
+.sections-wrapper.stash-mode {
+    flex-direction: row;
+    gap: 16px;
+    padding: 10px 28px 16px;
+}
+
+.sections-wrapper.stash-mode #section-bag {
+    flex: 1;
+    order: 1;
+    /* MY BAG on the left */
+}
+
+.sections-wrapper.stash-mode #section-bag .item-grid {
+    grid-template-columns: repeat(3, 1fr);
+    /* Bigger items (3 per row) */
+}
+
+.sections-wrapper.stash-mode #section-container {
+    flex: 1;
+    order: 2;
+    /* MY CONTAINER on the right */
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Allow container grid to expand vertically in stash mode */
+.sections-wrapper.stash-mode #section-container .item-grid {
+    grid-template-columns: repeat(3, 1fr);
+    /* Bigger items (3 per row) */
+    grid-template-rows: auto;
+    grid-auto-rows: min-content;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.sections-wrapper.stash-mode #section-hotbar {
+    display: none !important;
+    /* Hide hotbar */
+}
+
 .section-header {
     display: flex;
     align-items: center;

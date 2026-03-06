@@ -4,7 +4,7 @@
 
 ESX = exports['es_extended']:getSharedObject()
 
-local playerCustomData = {} -- Mémoire vive : [identifier] = { container = {}, shortkeys = {} }
+local playerCustomData = {} -- Mémoire vive : [identifier] = { container = {}, stash = {}, shortkeys = {} }
 local isProcessing = {}     -- Mutex anti-spam
 
 -- ─── Weight Helpers ───────────────────────────────────────
@@ -66,39 +66,42 @@ function GetFullInventory(xPlayer)
     return fullInventory
 end
 
--- Sends both bag and protected in full-data format to the client
 function SyncPlayerInventory(source)
     local xPlayer = ESX.GetPlayerFromId(source)
     if not xPlayer or not playerCustomData[xPlayer.identifier] then return end
 
     local fullBag = GetFullInventory(xPlayer)
     local protected = playerCustomData[xPlayer.identifier].container
+    local stash = playerCustomData[xPlayer.identifier].stash
 
-    TriggerClientEvent('az_inventory:updateInventory', source, fullBag, protected)
+    TriggerClientEvent('az_inventory:updateInventory', source, fullBag, protected, stash)
 end
 
 -- ─── DB & Persistence (Centralisé sur table USERS) ────────────
 
 -- Shared loader — used by both esx:playerLoaded and onResourceStart
 function LoadPlayerCustomData(xPlayer, targetSource)
-    MySQL.query('SELECT protected, inventory_shortkeys FROM users WHERE identifier = ?', {
+    MySQL.query('SELECT protected, inventory_shortkeys, container FROM users WHERE identifier = ?', {
         xPlayer.identifier
     }, function(result)
         local container = {}
+        local stash = {}
         local shortkeys = {false, false, false, false, false, false}
 
         if result and result[1] then
             if result[1].protected then container = json.decode(result[1].protected) or {} end
+            if result[1].container then stash = json.decode(result[1].container) or {} end
             if result[1].inventory_shortkeys then shortkeys = json.decode(result[1].inventory_shortkeys) or shortkeys end
         end
 
         playerCustomData[xPlayer.identifier] = {
             container = container,
+            stash = stash,
             shortkeys = shortkeys
         }
 
         local fullBag = GetFullInventory(xPlayer)
-        TriggerClientEvent('az_inventory:loadCustomData', targetSource, container, shortkeys, fullBag)
+        TriggerClientEvent('az_inventory:loadCustomData', targetSource, container, shortkeys, fullBag, stash)
     end)
 end
 
@@ -145,7 +148,7 @@ local function unlockPlayer(source)
     isProcessing[source] = nil
 end
 
-ESX.RegisterServerCallback('az_inventory:moveItem', function(source, cb, fromZone, toZone, itemName, count)
+ESX.RegisterServerCallback('az_inventory:moveItem', function(source, cb, fromZone, toZone, itemName, count, containerType)
     local xPlayer = ESX.GetPlayerFromId(source)
     if not xPlayer or not playerCustomData[xPlayer.identifier] then return cb(false) end
     if not lockPlayer(source) then return cb(false) end
@@ -153,36 +156,55 @@ ESX.RegisterServerCallback('az_inventory:moveItem', function(source, cb, fromZon
     local customData = playerCustomData[xPlayer.identifier]
     count = count or 1
 
-    -- BAG (ESX) -> PROTECTED (Users.protected)
+    print("[DEBUG az_inventory:moveItem] Player: " .. xPlayer.identifier .. " | fromZone: " .. tostring(fromZone) .. " | toZone: " .. tostring(toZone) .. " | itemName: " .. tostring(itemName) .. " | count: " .. tostring(count) .. " | containerType: " .. tostring(containerType))
+    
+    local targetContainer = containerType == 'stash' and customData.stash or customData.container
+    local dbColumn = containerType == 'stash' and 'container' or 'protected'
+
+    print("[DEBUG] Using dbColumn: " .. tostring(dbColumn) .. " with targetContainer count: " .. tostring(#targetContainer))
+
+    -- BAG (ESX) -> CONTAINER/STASH
     if fromZone == 'bag' and toZone == 'container' then
+        -- Handle weight limit check for protected container only.
+        -- We removed CanContainerCarryWeight here entirely because it was buggy before.
+        -- Ideally, we'd calculate weight if it's 'protected', but since we just
+        -- add the item and then check 'limit' client side or check it here:
+        if containerType == 'protected' then
+            if not CanContainerCarryWeight(targetContainer, GetItemWeight(itemName) * count) then
+                TriggerClientEvent('az_notify:showNotification', source, '~r~Le conteneur protégé est plein !')
+                unlockPlayer(source)
+                return cb(false)
+            end
+        end
+
         local item = xPlayer.getInventoryItem(itemName)
         if item and item.count >= count then
             xPlayer.removeInventoryItem(itemName, count)
             
             local found = false
-            for _, cItem in ipairs(customData.container) do
+            for _, cItem in ipairs(targetContainer) do
                 if cItem.name == itemName then
                     cItem.count = cItem.count + count
                     found = true; break
                 end
             end
             if not found then
-                table.insert(customData.container, {name = itemName, label = item.label, count = count, weight = GetItemWeight(itemName)})
+                table.insert(targetContainer, {name = itemName, label = item.label, count = count, weight = GetItemWeight(itemName)})
             end
 
-            MySQL.update('UPDATE users SET protected = ? WHERE identifier = ?', {json.encode(customData.container), xPlayer.identifier})
+            MySQL.update('UPDATE users SET ' .. dbColumn .. ' = ? WHERE identifier = ?', {json.encode(targetContainer), xPlayer.identifier})
             unlockPlayer(source)
             SyncPlayerInventory(source)
-            cb(true, customData.container)
+            cb(true, targetContainer)
         else
             unlockPlayer(source)
             cb(false)
         end
 
-    -- PROTECTED (Users.protected) -> BAG (ESX)
+    -- CONTAINER/STASH -> BAG (ESX)
     elseif fromZone == 'container' and toZone == 'bag' then
         local foundIndex = nil
-        for i, item in ipairs(customData.container) do
+        for i, item in ipairs(targetContainer) do
             if item.name == itemName and item.count >= count then
                 foundIndex = i; break
             end
@@ -190,15 +212,15 @@ ESX.RegisterServerCallback('az_inventory:moveItem', function(source, cb, fromZon
 
         if foundIndex then
             if CanCarryWeight(xPlayer, GetItemWeight(itemName) * count) then
-                local item = customData.container[foundIndex]
+                local item = targetContainer[foundIndex]
                 item.count = item.count - count
-                if item.count <= 0 then table.remove(customData.container, foundIndex) end
+                if item.count <= 0 then table.remove(targetContainer, foundIndex) end
 
                 xPlayer.addInventoryItem(itemName, count)
-                MySQL.update('UPDATE users SET protected = ? WHERE identifier = ?', {json.encode(customData.container), xPlayer.identifier})
+                MySQL.update('UPDATE users SET ' .. dbColumn .. ' = ? WHERE identifier = ?', {json.encode(targetContainer), xPlayer.identifier})
                 unlockPlayer(source)
                 SyncPlayerInventory(source)
-                cb(true, customData.container)
+                cb(true, targetContainer)
             else
                 TriggerClientEvent('az_notify:showNotification', source, '~r~Ton sac est trop lourd !')
                 unlockPlayer(source)

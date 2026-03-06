@@ -17,6 +17,7 @@
         selectedSlot: null,
         contextTarget: null,
         lastAction: null,
+        containerType: 'protected', // 'protected' or 'stash'
     };
 
     let _globalDragClone = null;
@@ -36,6 +37,7 @@
         weightBarFill: $('#weight-bar-fill'),
         containerWeightCurrent: $('#container-weight-current'),
         containerWeightMax: $('#container-weight-max'),
+        containerLabel: $('#container-label'),
         contextMenu: $('#context-menu'),
         tooltip: $('#item-tooltip'),
         tooltipName: $('#tooltip-name'),
@@ -136,7 +138,11 @@
             dom.containerWeightCurrent.textContent = containerWeight.toFixed(1);
         }
         if (dom.containerWeightMax) {
-            dom.containerWeightMax.textContent = state.containerMaxWeight;
+            if (state.containerMaxWeight === '∞') {
+                dom.containerWeightMax.textContent = '∞';
+            } else {
+                dom.containerWeightMax.textContent = state.containerMaxWeight;
+            }
         }
     }
 
@@ -150,6 +156,7 @@
         if (toZone === 'bag') {
             return calculateWeight(state.bagItems) + (itemDef.weight || 0) <= state.maxWeight;
         } else if (toZone === 'container') {
+            if (state.containerMaxWeight === '∞') return true;
             return calculateWeight(state.containerItems) + (itemDef.weight || 0) <= state.containerMaxWeight;
         }
         return true;
@@ -217,13 +224,13 @@
                             const skIdx = state.shortkeyItems.findIndex(i => i && i.name === item.name);
                             if (skIdx !== -1) state.shortkeyItems[skIdx] = null;
                         }
-                        postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: item.name, count: 1 });
+                        postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: item.name, count: 1, containerType: state.containerType });
                         renderAll();
                     } else if (zone === 'container' && toZone === 'bag') {
                         if (!canFitItem(item.name, 'bag')) return;
 
                         moveOneItem(item.name, state.containerItems, state.bagItems);
-                        postNUI('moveItem', { fromZone: 'container', toZone: 'bag', item: item.name, count: 1 });
+                        postNUI('moveItem', { fromZone: 'container', toZone: 'bag', item: item.name, count: 1, containerType: state.containerType });
                         renderAll();
                     }
                 }
@@ -246,7 +253,7 @@
     }
     function renderContainer() {
         const frag = document.createDocumentFragment();
-        const totalVisibleSlots = 12;
+        const totalVisibleSlots = 18; // 6 rows of 3 in stash mode
 
         // On affiche uniquement les items réels à la suite (Index dynamique)
         state.containerItems.forEach((item, i) => {
@@ -309,7 +316,7 @@
                         postNUI('setShortkey', { slot: i, item: null });
                     }
                     state.lastAction = { fromZone: 'bag', toZone: 'container' };
-                    postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: item.name, count: 1 });
+                    postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: item.name, count: 1, containerType: state.containerType });
                     renderAll();
                 });
             } else {
@@ -408,7 +415,7 @@
 
         switch (action) {
             case 'use':
-                postNUI('useItem', { item: item.name, slot: index, zone });
+                postNUI('useItem', { item: item.name, slot: index, zone, containerType: state.containerType });
                 if (isTestMode) {
                     console.log(`✅ Used item: ${item.label}`);
                 }
@@ -641,11 +648,11 @@
                         state.shortkeyItems[fromIndex] = null;
                         postNUI('setShortkey', { slot: fromIndex, item: null });
                     }
-                    postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: itemName, count: 1 });
+                    postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: itemName, count: 1, containerType: state.containerType });
                 }
                 else if (fromZone === 'container' && toZone === 'bag') {
                     moveOneItem(itemName, state.containerItems, state.bagItems);
-                    postNUI('moveItem', { fromZone: 'container', toZone: 'bag', item: itemName, count: 1 });
+                    postNUI('moveItem', { fromZone: 'container', toZone: 'bag', item: itemName, count: 1, containerType: state.containerType });
                 }
                 else if (toZone === 'shortkey') {
                     const allSourceItems = [...state.bagItems, ...state.containerItems];
@@ -670,7 +677,16 @@
             state.bagItems = (data.inventory || []).filter(i => i && i.count > 0);
             state.containerItems = data.container || [];
             state.maxWeight = data.maxWeight;
-            state.containerMaxWeight = data.containerMaxWeight || 200.0;
+            state.containerType = data.containerType || 'protected';
+
+            // Set max weight and label based on container type
+            if (state.containerType === 'stash') {
+                state.containerMaxWeight = '∞';
+                if (dom.containerLabel) dom.containerLabel.textContent = data.containerLabel || 'MY CONTAINER';
+            } else {
+                state.containerMaxWeight = data.containerMaxWeight || 200.0;
+                if (dom.containerLabel) dom.containerLabel.textContent = 'PROTECTED CONTAINER';
+            }
 
             if (data.shortkeys && Array.isArray(data.shortkeys)) {
                 // Shortkeys are an array of strings (item names) or false/null
@@ -680,6 +696,13 @@
                     const found = allItems.find(i => i && i.name === sk);
                     return found ? { ...found } : { name: sk, label: sk.replace(/_/g, ' '), count: 0, weight: 0 };
                 });
+            }
+
+            const wrapper = document.querySelector('.sections-wrapper');
+            if (state.containerType === 'stash') {
+                wrapper.classList.add('stash-mode');
+            } else {
+                wrapper.classList.remove('stash-mode');
             }
 
             if (data.playerName) dom.playerName.textContent = data.playerName;
@@ -718,7 +741,11 @@
                 break;
             case 'updateInventory':
                 state.bagItems = (data.inventory || []).filter(i => i && i.count > 0);
-                if (data.container) state.containerItems = data.container;
+                if (state.containerType === 'stash') {
+                    if (data.container) state.containerItems = data.container;
+                } else {
+                    if (data.container) state.containerItems = data.container;
+                }
                 renderAll();
                 break;
         }
