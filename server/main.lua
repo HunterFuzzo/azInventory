@@ -161,7 +161,7 @@ ESX.RegisterServerCallback('az_inventory:moveItem', function(source, cb, fromZon
     if fromZone == 'bag' and toZone == 'container' then
         if containerType == 'protected' then
             if not CanContainerCarryWeight(targetContainer, GetItemWeight(itemName) * count) then
-                TriggerClientEvent('az_notify:showNotification', source, '~r~Le conteneur protégé est plein !')
+                TriggerClientEvent('az_notify:showNotification', source, '~r~The protected container is full!')
                 unlockPlayer(source)
                 return cb(false)
             end
@@ -227,7 +227,7 @@ ESX.RegisterServerCallback('az_inventory:moveItem', function(source, cb, fromZon
                 SyncPlayerInventory(source)
                 cb(true, targetContainer)
             else
-                TriggerClientEvent('az_notify:showNotification', source, '~r~Ton sac est trop lourd !')
+                TriggerClientEvent('az_notify:showNotification', source, '~r~Your bag is too heavy!')
                 unlockPlayer(source)
                 cb(false)
             end
@@ -368,7 +368,7 @@ ESX.RegisterServerCallback('az_inventory:pickupBag', function(source, cb, bagId)
             cb(true)
         else
             -- Notification d'erreur de poids (Rouge)
-            TriggerClientEvent('az_notify:showNotification', _source, "~r~Votre inventaire est trop lourd !", 6)
+            TriggerClientEvent('az_notify:showNotification', _source, "~r~Your inventory is too heavy!", 6)
             cb(false)
         end
     else
@@ -557,7 +557,7 @@ ESX.RegisterServerCallback('az_inventory:giveItem', function(source, cb, itemNam
 
     local xTarget = ESX.GetPlayerFromId(targetId)
     if not xTarget then
-        TriggerClientEvent('az_notify:showNotification', source, '~r~Joueur introuvable.')
+        TriggerClientEvent('az_notify:showNotification', source, '~r~Player not found.')
         cb(false)
         return
     end
@@ -580,7 +580,7 @@ ESX.RegisterServerCallback('az_inventory:giveItem', function(source, cb, itemNam
     local targetPed = t and GetPlayerPed(t)
 
     if not playerPed or playerPed == 0 or not targetPed or targetPed == 0 then
-        TriggerClientEvent('az_notify:showNotification', source, '~r~Erreur technique (Ped introuvable).')
+        TriggerClientEvent('az_notify:showNotification', source, '~r~Technical error (Ped not found).')
         unlockPlayer(source)
         cb(false)
         return
@@ -589,7 +589,7 @@ ESX.RegisterServerCallback('az_inventory:giveItem', function(source, cb, itemNam
     local dist = #(GetEntityCoords(playerPed) - GetEntityCoords(targetPed))
 
     if dist > 5.0 then
-        TriggerClientEvent('az_notify:showNotification', source, '~r~Le joueur est trop loin.')
+        TriggerClientEvent('az_notify:showNotification', source, '~r~The player is too far.')
         unlockPlayer(source)
         cb(false)
         return
@@ -597,7 +597,7 @@ ESX.RegisterServerCallback('az_inventory:giveItem', function(source, cb, itemNam
 
     -- Check target can carry the weight
     if not CanCarryWeight(xTarget, GetItemWeight(itemName) * count) then
-        TriggerClientEvent('az_notify:showNotification', source, '~r~L\'inventaire du joueur est trop lourd.')
+        TriggerClientEvent('az_notify:showNotification', source, "~r~The player's inventory is too heavy.")
         unlockPlayer(source)
         cb(false)
         return
@@ -606,8 +606,8 @@ ESX.RegisterServerCallback('az_inventory:giveItem', function(source, cb, itemNam
     xPlayer.removeInventoryItem(itemName, count)
     xTarget.addInventoryItem(itemName, count)
 
-    TriggerClientEvent('az_notify:showNotification', source, ('~g~Vous avez donné %dx %s'):format(count, item.label or itemName))
-    TriggerClientEvent('az_notify:showNotification', targetId, ('~g~Vous avez reçu %dx %s'):format(count, item.label or itemName))
+    TriggerClientEvent('az_notify:showNotification', source, ('~g~You gave %dx %s'):format(count, item.label or itemName))
+    TriggerClientEvent('az_notify:showNotification', targetId, ('~g~You received %dx %s'):format(count, item.label or itemName))
 
     -- Refresh both players' UI with full data
     SyncPlayerInventory(source)

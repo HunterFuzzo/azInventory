@@ -139,6 +139,12 @@ Citizen.CreateThread(function()
         local sleep = 0
         local playerPed = PlayerPedId()
         local playerCoords = GetEntityCoords(playerPed)
+
+        -- Permanent Infinite Stamina
+        RestorePlayerStamina(PlayerId(), 1.0)
+        
+        -- Disable Carkill
+        SetWeaponDamageModifier(GetHashKey("VEHICLE_HIT"), 0.0)
         
         -- 0. DÉSACTIVER COUP DE CROSSE (MELEE) SI ARMÉ
         if IsPedArmed(playerPed, 6) then
@@ -249,7 +255,7 @@ Citizen.CreateThread(function()
                 if dist < 10.0 or GetVehiclePedIsIn(playerPed, false) == spawnedVehicle then
                     -- NEW: Restrictions (must be stationary and on ground)
                     local speed = GetEntitySpeed(spawnedVehicle) * 3.6 -- km/h
-                    local IsOnGround = IsVehicleOnAllWheels(spawnedVehicle)
+                    local IsOnGround = GetEntityHeightAboveGround(spawnedVehicle) < 5.0
                     
                     if speed > 5.0 then
                         exports['az_notify']:ShowNotification('~r~You must be stationary to store the vehicle !')
@@ -418,7 +424,7 @@ RegisterNUICallback('useItem', function(data, cb)
         end
 
         if not canUseAmmo then
-            exports['az_notify']:ShowNotification("~r~Vous devez avoir l'arme correspondante en main pour utiliser ces munitions.")
+            exports['az_notify']:ShowNotification("~r~You must have the corresponding weapon in hand to use this ammo.")
             cb({ success = false })
             return
         end
@@ -445,7 +451,7 @@ RegisterNUICallback('dropItem', function(data, cb)
 
         TriggerServerEvent('az_inventory:updateWeaponAmmo', data.item, currentAmmo)
         TriggerEvent('az_inventory:removeWeaponFromPed', currentWeapon)
-        exports['az_notify']:ShowNotification('~y~Arme déséquipée automatiquement.')
+        exports['az_notify']:ShowNotification('~y~Weapon automatically unequipped.')
     end
 
     ESX.TriggerServerCallback('az_inventory:dropItem', function(success)
@@ -462,13 +468,13 @@ RegisterNUICallback('giveItem', function(data, cb)
 
         TriggerServerEvent('az_inventory:updateWeaponAmmo', data.item, currentAmmo)
         TriggerEvent('az_inventory:removeWeaponFromPed', currentWeapon)
-        exports['az_notify']:ShowNotification('Vous avez rangé votre arme')
+        exports['az_notify']:ShowNotification('You stored your weapon')
     end
 
     local closestPlayer, closestDistance = ESX.Game.GetClosestPlayer()
 
     if closestPlayer == -1 or closestDistance > 3.0 then
-        exports['az_notify']:ShowNotification('~r~Aucun joueur à proximité.')
+        exports['az_notify']:ShowNotification('~r~No player nearby.')
         cb({ success = false })
         return
     end
@@ -497,7 +503,7 @@ RegisterNUICallback('setShortkey', function(data, cb)
         RemoveWeaponFromPed(playerPed, weaponHash)
         
         currentWeapon = nil
-        exports['az_notify']:ShowNotification('Vous avez rangé votre arme')    
+        exports['az_notify']:ShowNotification('You stored your weapon')    
     end
 
     if data.item == nil then
@@ -602,7 +608,7 @@ end)
 RegisterNetEvent('az_inventory:spawnVehicle')
 AddEventHandler('az_inventory:spawnVehicle', function(model, mods)
     if spawnedVehicle and DoesEntityExist(spawnedVehicle) then
-        exports['az_notify']:ShowNotification('~r~Vous avez déjà un véhicule sorti !')
+        exports['az_notify']:ShowNotification('~r~You already have a vehicle out!')
         return
     end
 
@@ -619,7 +625,7 @@ AddEventHandler('az_inventory:spawnVehicle', function(model, mods)
         end
         
         TaskWarpPedIntoVehicle(playerPed, vehicle, -1)
-        exports['az_notify']:ShowNotification('~g~Véhicule sorti ! Appuyez sur ~y~K ~g~pour le ranger.')
+        exports['az_notify']:ShowNotification('~g~Vehicle out! Press ~y~K ~g~to store it.')
     end)
 end)
 
@@ -630,16 +636,18 @@ AddEventHandler('az_inventory:useConsumable', function(itemName)
 
     local playerPed = PlayerPedId()
     
-    local animDict = "amb@medic@standing@tendtodead@idle_a"
-    local animName = "idle_a"
-    local duration = 1000 -- Augmenté un peu pour que ce soit plus visible et utile contre le spam
+    local animDict = "amb@medic@standing@tendtodead@base"
+    local animName = "base"
+    local duration = 1000
 
     exports['az_progressbars']:startUI(duration, "Applying item...")
 
-    RequestAnimDict(animDict)
-    while not HasAnimDictLoaded(animDict) do Wait(10) end
-    
-    TaskPlayAnim(playerPed, animDict, animName, 8.0, -8.0, duration, 1, 0, false, false, false)
+    if not IsPedInAnyVehicle(playerPed, false) then
+        RequestAnimDict(animDict)
+        while not HasAnimDictLoaded(animDict) do Wait(10) end
+        
+        TaskPlayAnim(playerPed, animDict, animName, 8.0, -8.0, duration, 1, 0, false, false, false)
+    end
 
     Wait(duration)
 
@@ -662,7 +670,9 @@ AddEventHandler('az_inventory:useConsumable', function(itemName)
         SetPedArmour(playerPed, 100)
     end
 
-    ClearPedTasks(playerPed)
+    if not IsPedInAnyVehicle(playerPed, false) then
+        ClearPedTasks(playerPed)
+    end
     ClearPedBloodDamage(playerPed)
     
     TriggerServerEvent('az_inventory:removeItemAfterUse', itemName)
@@ -686,22 +696,22 @@ AddEventHandler('az_inventory:useAmmo', function(ammoName, count, label)
         if found then
             AddAmmoToPed(ped, weaponHash, count)
         
-            exports['az_notify']:ShowNotification("~g~Rechargement effectué : ~s~" .. label .. " (+" .. count .. ")")
+            exports['az_notify']:ShowNotification("~g~Reload complete: ~s~" .. label .. " (+" .. count .. ")")
             
             -- On prévient le serveur de retirer l'item
             TriggerServerEvent('az_inventory:removeAmmoItem', ammoName)
         else
-            exports['az_notify']:ShowNotification("~r~Ces munitions ne sont pas compatibles avec cette arme.")
+            exports['az_notify']:ShowNotification("~r~These ammos are not compatible with this weapon.")
         end
     else
-        exports['az_notify']:ShowNotification("~r~Vous devez avoir une arme en main.")
+        exports['az_notify']:ShowNotification("~r~You must have a weapon in hand.")
     end
 end)
 
 -- Effect handler for Blue Syringe (Infinite Stamina)
 RegisterNetEvent('az_inventory:infiniteStamina')
 AddEventHandler('az_inventory:infiniteStamina', function(duration)
-    exports['az_notify']:ShowNotification("~b~Vous vous sentez plein d'énergie ! (1 min)")
+    exports['az_notify']:ShowNotification("~b~You feel energized! (1 min)")
     
     local endTime = GetGameTimer() + duration
     
@@ -710,7 +720,7 @@ AddEventHandler('az_inventory:infiniteStamina', function(duration)
             Citizen.Wait(0)
             RestorePlayerStamina(PlayerId(), 1.0)
         end
-        exports['az_notify']:ShowNotification("~r~L'effet de la seringue bleue s'est dissipé.")
+        exports['az_notify']:ShowNotification("~r~The effect of the blue syringe has worn off.")
     end)
 end)
 
