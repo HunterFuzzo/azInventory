@@ -18,6 +18,11 @@
         contextTarget: null,
         lastAction: null,
         containerType: 'protected', // 'protected' or 'stash'
+        currentTab: 'inventory',
+        shopItems: [],
+        shopSearchQuery: '',
+        shopFilter: 'all',
+        autoReload: false,
     };
 
     let _globalDragClone = null;
@@ -47,6 +52,13 @@
         playerName: $('#player-name'),
         playerId: $('#player-id'),
         money: $('#player-money'),
+        shopGrid: $('#shop-grid'),
+        sectionBag: $('#section-bag'),
+        sectionContainer: $('#section-container'),
+        sectionHotbar: $('#section-hotbar'),
+        sectionShop: $('#section-shop'),
+        sectionProfile: $('#section-profile'),
+        sidebarItems: $$('.sidebar-item'),
     };
 
     // ─── Test Mode Detection ──────────────────────────────────
@@ -124,6 +136,15 @@
         }, 0);
     }
 
+    function formatPrice(num) {
+        if (!num) return '0$';
+        const val = Number(num);
+        if (val >= 1000000000) return (val / 1000000000).toFixed(1).replace(/\.0$/, '') + 'B$';
+        if (val >= 1000000) return (val / 1000000).toFixed(1).replace(/\.0$/, '') + 'M$';
+        if (val >= 1000) return (val / 1000).toFixed(1).replace(/\.0$/, '') + 'k$';
+        return val + '$';
+    }
+
     function updateWeightDisplay() {
         const bagWeight = calculateWeight(state.bagItems);
         const pct = Math.min((bagWeight / state.maxWeight) * 100, 100);
@@ -192,6 +213,7 @@
 
         if (item) {
             slot.dataset.itemName = item.name;
+            if (item.id) slot.dataset.id = item.id;
             slot.innerHTML = `
                 <img class="item-image" src="${getItemImagePath(item.name)}" alt="${item.label}" 
                      onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2248%22 height=%2248%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23616161%22 stroke-width=%221.5%22><rect x=%222%22 y=%222%22 width=%2220%22 height=%2220%22 rx=%222%22/><line x1=%222%22 y1=%222%22 x2=%2222%22 y2=%2222%22/><line x1=%2222%22 y1=%222%22 x2=%222%22 y2=%2222%22/></svg>'">
@@ -211,36 +233,20 @@
                 showContextMenu(e, item, zone, index);
             });
 
-            // Click to quick move (repeat last drag action)
-            slot.addEventListener('click', () => {
-                if (state.lastAction && state.lastAction.fromZone === zone) {
-                    const toZone = state.lastAction.toZone;
-
-                    if (zone === 'bag' && toZone === 'container') {
-                        if (!canFitItem(item.name, 'container')) return;
-
-                        const depleted = moveOneItem(item.name, state.bagItems, state.containerItems);
-                        if (depleted) {
-                            const skIdx = state.shortkeyItems.findIndex(i => i && i.name === item.name);
-                            if (skIdx !== -1) state.shortkeyItems[skIdx] = null;
-                        }
-                        postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: item.name, count: 1, containerType: state.containerType });
-                        renderAll();
-                    } else if (zone === 'container' && toZone === 'bag') {
-                        if (!canFitItem(item.name, 'bag')) return;
-
-                        moveOneItem(item.name, state.containerItems, state.bagItems);
-                        postNUI('moveItem', { fromZone: 'container', toZone: 'bag', item: item.name, count: 1, containerType: state.containerType });
-                        renderAll();
-                    }
-                }
-            });
+            // Seller name for shop
+            if (zone === 'shop' && item.sellerName) {
+                const seller = document.createElement('div');
+                seller.className = 'item-seller';
+                seller.textContent = `Sold by: ${item.sellerName}`;
+                slot.appendChild(seller);
+            }
         }
 
         return slot;
     }
 
     function renderBag() {
+        if (state.currentTab !== 'inventory' && state.currentTab !== 'shop') return;
         const frag = document.createDocumentFragment();
         for (let i = 0; i < state.bagItems.length; i++) {
             const item = state.bagItems[i];
@@ -253,7 +259,20 @@
     }
     function renderContainer() {
         const frag = document.createDocumentFragment();
-        const totalVisibleSlots = 18; // 6 rows of 3 in stash mode
+
+        let totalVisibleSlots = 12; // 6 cols * 2 rows max display without scroll
+        if (state.containerType === 'stash') {
+            totalVisibleSlots = 18; // Bigger stash mode layout
+            dom.containerGrid.classList.add('scroll-active'); // Always scrollable in stash
+        } else {
+            // If items exceed 2 lines (12 slots), make it scrollable dynamically
+            if (state.containerItems.length > 12) {
+                totalVisibleSlots = Math.ceil(state.containerItems.length / 6) * 6; // Fill last line
+                dom.containerGrid.classList.add('scroll-active');
+            } else {
+                dom.containerGrid.classList.remove('scroll-active');
+            }
+        }
 
         // On affiche uniquement les items réels à la suite (Index dynamique)
         state.containerItems.forEach((item, i) => {
@@ -262,7 +281,7 @@
             }
         });
 
-        // On remplit le reste avec des slots vides
+        // On remplit le reste avec des slots vides jusqu'au totalVisibleSlots minimum
         for (let i = state.containerItems.length; i < totalVisibleSlots; i++) {
             const emptySlot = document.createElement('div');
             emptySlot.className = 'item-slot empty';
@@ -295,30 +314,31 @@
             slot.dataset.index = i;
 
             let inner = `<span class="shortkey-number">${i + 1}</span>`;
-            if (item && !isGhost) {
-                // Only set dataset.itemName for REAL (non-ghost) items.
-                // Ghost slots must look empty to SortableJS so they can always be overwritten.
+            if (item) {
+                // Set dataset.itemName even for ghosts so they can be dragged/cleared.
                 slot.dataset.itemName = item.name;
                 inner += `
                     <img class="item-image" src="${getItemImagePath(item.name)}" alt="${item.label}"
                          onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2232%22 height=%2232%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23616161%22 stroke-width=%221.5%22><rect x=%222%22 y=%222%22 width=%2220%22 height=%2220%22 rx=%222%22/></svg>'">
-                    <span class="item-name">${item.label}</span>
+                    ${!isGhost ? `<span class="item-name">${item.label}</span>` : ''}
                 `;
 
                 slot.innerHTML = inner;
 
-                // Click: move item to container
-                slot.addEventListener('click', () => {
-                    if (!canFitItem(item.name, 'container')) return;
-                    const depleted = moveOneItem(item.name, state.bagItems, state.containerItems);
-                    if (depleted) {
-                        state.shortkeyItems[i] = null;
-                        postNUI('setShortkey', { slot: i, item: null });
-                    }
-                    state.lastAction = { fromZone: 'bag', toZone: 'container' };
-                    postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: item.name, count: 1, containerType: state.containerType });
-                    renderAll();
-                });
+                if (!isGhost) {
+                    // Click: move item to container
+                    slot.addEventListener('click', () => {
+                        if (!canFitItem(item.name, 'container')) return;
+                        const depleted = moveOneItem(item.name, state.bagItems, state.containerItems);
+                        if (depleted) {
+                            state.shortkeyItems[i] = null;
+                            postNUI('setShortkey', { slot: i, item: null });
+                        }
+                        state.lastAction = { fromZone: 'bag', toZone: 'container' };
+                        postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: item.name, count: 1, containerType: state.containerType });
+                        renderAll();
+                    });
+                }
             } else {
                 slot.innerHTML = inner;
             }
@@ -328,16 +348,138 @@
         dom.shortkeysSlots.replaceChildren(frag);
     }
 
+    function renderShop() {
+        if (state.currentTab !== 'shop') return;
+        const frag = document.createDocumentFragment();
+
+        // Filter items
+        let filtered = state.shopItems;
+
+        // Search
+        if (state.shopSearchQuery && state.shopSearchQuery.trim() !== '') {
+            const query = state.shopSearchQuery.toLowerCase();
+            filtered = filtered.filter(it =>
+                it.label.toLowerCase().includes(query) ||
+                it.name.toLowerCase().includes(query)
+            );
+        }
+
+        // Category Filter
+        if (state.shopFilter !== 'all') {
+            filtered = filtered.filter(it => {
+                if (state.shopFilter === 'mysell') return it.isMine;
+
+                const name = it.name.toUpperCase();
+                switch (state.shopFilter) {
+                    case 'weapon': return name.startsWith('WEAPON_');
+                    case 'ammo': return name.startsWith('AMMO_');
+                    case 'medical': return name.includes('MEDKIT') || name.includes('BANDAGE') || name.includes('SYRINGE') || name.includes('KEVLAR');
+                    case 'other': return !name.startsWith('WEAPON_') && !name.startsWith('AMMO_') && !name.includes('MEDKIT') && !name.includes('BANDAGE') && !name.includes('SYRINGE') && !name.includes('KEVLAR');
+                    default: return true;
+                }
+            });
+        }
+
+        if (filtered.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'empty-shop-message';
+            empty.textContent = (state.shopItems.length === 0) ? 'Marketplace is empty.' : 'No items matching your search.';
+            frag.appendChild(empty);
+        } else {
+            filtered.forEach((item, i) => {
+                const slot = createItemSlot(item, 'shop', i);
+                if (item.id) slot.dataset.id = item.id;
+
+                const price = document.createElement('div');
+                price.className = 'item-price';
+                price.textContent = formatPrice(item.price);
+                slot.appendChild(price);
+                frag.appendChild(slot);
+            });
+        }
+        dom.shopGrid.replaceChildren(frag);
+    }
+
+    function renderProfile(data) {
+        if (!data) return;
+
+        // Personal Stats
+        const nameEl = $('#profile-name');
+        const idEl = $('#profile-id');
+        if (nameEl) nameEl.textContent = data.name || state.playerName || 'Unknown';
+        if (idEl) idEl.textContent = `ID: ${data.id || state.playerId || 0}`;
+
+        const killsEl = $('#stat-kills');
+        const deathsEl = $('#stat-deaths');
+        const kdaEl = $('#stat-kda');
+        const assistsEl = $('#stat-assists');
+        const confirmedEl = $('#stat-kill-confirmed');
+
+        if (killsEl) killsEl.textContent = data.kills || 0;
+        if (deathsEl) deathsEl.textContent = data.deaths || 0;
+        if (kdaEl) kdaEl.textContent = (data.kills / Math.max(1, data.deaths)).toFixed(2);
+        if (assistsEl) assistsEl.textContent = data.assists || 0;
+        if (confirmedEl) confirmedEl.textContent = data.kill_confirmed || 0;
+
+        // Leaderboard
+        const tbody = $('#leaderboard-body');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        if (data.leaderboard && data.leaderboard.length > 0) {
+            data.leaderboard.forEach((user, index) => {
+                const tr = document.createElement('tr');
+                const kda = (user.kills / Math.max(1, user.deaths)).toFixed(2);
+                tr.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${user.name}</td>
+                    <td>${user.kills}</td>
+                    <td>${kda}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } else {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td colspan="4" style="text-align:center; padding: 20px; color: var(--text-muted); font-size: 11px;">No rankings available yet.</td>`;
+            tbody.appendChild(tr);
+        }
+    }
+
     function renderAll() {
-        renderBag();
-        renderContainer();
-        renderShortkeys();
+        const wrapper = $('.sections-wrapper');
+
+        // Visibility management
+        dom.sectionBag.classList.toggle('hidden', state.currentTab === 'profile');
+        dom.sectionProfile.classList.toggle('hidden', state.currentTab !== 'profile');
+
+        if (state.currentTab === 'inventory') {
+            wrapper.classList.remove('shop-mode');
+            dom.sectionContainer.classList.remove('hidden');
+            dom.sectionHotbar.classList.remove('hidden');
+            dom.sectionShop.classList.add('hidden');
+
+            renderBag();
+            renderContainer();
+            renderShortkeys();
+        } else if (state.currentTab === 'shop') {
+            wrapper.classList.add('shop-mode');
+            dom.sectionContainer.classList.add('hidden');
+            dom.sectionHotbar.classList.add('hidden');
+            dom.sectionShop.classList.remove('hidden');
+
+            renderBag();
+            renderShop();
+        } else if (state.currentTab === 'profile') {
+            wrapper.classList.remove('shop-mode');
+            dom.sectionContainer.classList.add('hidden');
+            dom.sectionHotbar.classList.add('hidden');
+            dom.sectionShop.classList.add('hidden');
+        }
+
         if (!window.__dragInited) {
             initNativeDragAndDrop();
             window.__dragInited = true;
         }
-
-        // Initialize weapon previews();
     }
 
     // ─── Tooltip ──────────────────────────────────────────────
@@ -384,6 +526,39 @@
         if (infoQty) infoQty.textContent = `Qty: ${item.count}`;
 
         const menu = dom.contextMenu;
+
+        // Hide/Show action buttons based on zone
+        const actionItems = menu.querySelectorAll('.context-menu-item');
+        const sellBtn = document.getElementById('ctx-sell-btn');
+        const buyBtn = document.getElementById('ctx-buy-btn');
+        const removeBtn = document.getElementById('ctx-remove-btn');
+
+        if (zone === 'container') {
+            actionItems.forEach(el => el.style.display = 'none');
+            const divider = menu.querySelector('.ctx-divider');
+            if (divider) divider.style.display = 'none';
+        } else if (zone === 'shop') {
+            actionItems.forEach(el => el.style.display = 'none');
+            const divider = menu.querySelector('.ctx-divider');
+            if (divider) divider.style.display = 'block'; // Always show divider in shop for info
+
+            if (buyBtn) buyBtn.style.display = (!item.isMine) ? 'flex' : 'none';
+            if (removeBtn) removeBtn.style.display = (item.isMine) ? 'flex' : 'none';
+            if (sellBtn) sellBtn.style.display = 'none';
+        } else {
+            actionItems.forEach(el => {
+                if (el.id !== 'ctx-remove-btn') el.style.display = 'flex';
+                else el.style.display = 'none';
+            });
+            const divider = menu.querySelector('.ctx-divider');
+            if (divider) divider.style.display = 'block';
+
+            if (removeBtn) removeBtn.style.display = 'none';
+            if (buyBtn) buyBtn.style.display = 'none';
+            // Only show sell button in shop tab
+            if (sellBtn) sellBtn.style.display = (state.currentTab === 'shop') ? 'flex' : 'none';
+        }
+
         menu.classList.remove('hidden');
 
         let x = e.clientX;
@@ -405,6 +580,58 @@
         state.contextTarget = null;
     }
 
+    // ─── Modal Logic ──────────────────────────────────────────
+    const sellModal = {
+        overlay: $('#sell-modal'),
+        qtyInput: $('#sell-qty'),
+        priceInput: $('#sell-price'),
+        confirmBtn: $('#sell-confirm-btn'),
+        cancelBtn: $('#sell-cancel-btn'),
+        cancelX: $('#sell-cancel-x'),
+
+        open(item) {
+            this.qtyInput.value = item.count;
+            this.priceInput.value = 100;
+            this.overlay.classList.remove('hidden');
+            this.qtyInput.focus();
+        },
+
+        close() {
+            this.overlay.classList.add('hidden');
+        }
+    };
+
+    sellModal.confirmBtn.addEventListener('click', () => {
+        if (!state.contextTarget) return;
+        const { item } = state.contextTarget;
+
+        const qty = parseInt(sellModal.qtyInput.value);
+        const price = parseInt(sellModal.priceInput.value);
+
+        if (isNaN(qty) || qty <= 0 || qty > item.count) {
+            postNUI('notifyError', { message: "~r~Quantité invalide." });
+            return;
+        }
+
+        if (isNaN(price) || price <= 0) {
+            postNUI('notifyError', { message: "~r~Invalid price." });
+            return;
+        }
+
+        if (price > 999999999) {
+            postNUI('notifyError', { message: "~r~Price too high (max 999M$)." });
+            return;
+        }
+
+        postNUI('sellItem', { item: item.name, label: item.label, count: qty, price: price });
+        sellModal.close();
+        hideContextMenu();
+    });
+
+    [sellModal.cancelBtn, sellModal.cancelX].forEach(btn => {
+        btn.addEventListener('click', () => sellModal.close());
+    });
+
     // Context menu actions
     dom.contextMenu.addEventListener('click', (e) => {
         const actionEl = e.target.closest('.context-menu-item');
@@ -415,7 +642,16 @@
 
         switch (action) {
             case 'use':
-                postNUI('useItem', { item: item.name, slot: index, zone, containerType: state.containerType });
+                const iName = item.name.toUpperCase();
+                const isConsumable = iName.includes('CONSUMABLE') || iName.includes('EQUIPMENT') || iName.includes('SYRINGE') || iName.includes('MEDKIT') || iName.includes('BANDAGE') || iName.includes('KEVLAR');
+                const isAmmo = iName.startsWith('AMMO_');
+
+                if (isConsumable || isAmmo) {
+                    postNUI('useItem', { item: item.name, slot: index, zone, containerType: state.containerType, isAmmo: isAmmo });
+                } else {
+                    postNUI('notifyError', { message: "~r~Cet objet ne peut pas être utilisé de cette manière." });
+                }
+
                 if (isTestMode) {
                     console.log(`✅ Used item: ${item.label}`);
                 }
@@ -432,6 +668,28 @@
                     renderAll();
                     console.log(`🗑️ Dropped item: ${item.label}`);
                 }
+                break;
+            case 'sell':
+                if (state.currentTab !== 'shop') return;
+                sellModal.open(item);
+                // hideContextMenu follows later, or inside sellModal logic
+                return; // Early return because we handle it in modal confirm
+            case 'buy':
+                if (zone !== 'shop') return;
+                postNUI('buyItem', { id: item.id }).then(resp => {
+                    if (resp && resp.success) {
+                        // Refresh shop items after purchase
+                        postNUI('getShopItems');
+                    }
+                });
+                break;
+            case 'remove':
+                if (zone !== 'shop') return;
+                postNUI('removeItem', { id: item.id }).then(resp => {
+                    if (resp && resp.success) {
+                        postNUI('getShopItems');
+                    }
+                });
                 break;
             case 'give':
                 postNUI('giveItem', { item: item.name, slot: index, zone, count: item.count });
@@ -535,7 +793,8 @@
 
             // Délai court pour différencier un Drag d'un simple Clic
             clickTimeout = setTimeout(() => {
-                isDragging = true;
+                // Initialize drag state but don't set isDragging = true until mousemove
+                isDragging = false;
 
                 draggedItemInfo = {
                     itemName: slot.dataset.itemName,
@@ -558,6 +817,7 @@
 
                 // Indispensable pour que le mouseup détecte la zone en dessous
                 _globalDragClone.style.pointerEvents = 'none';
+                _globalDragClone.style.display = 'none'; // Keep hidden until we actually start dragging
 
                 document.body.appendChild(_globalDragClone);
 
@@ -566,8 +826,14 @@
 
                 // --- 2. MOUSEMOVE (Mouvement du clone) ---
                 _globalMouseHandler = (moveEvt) => {
+                    // Start dragging only when we move the mouse a little bit
+                    if (Math.abs(moveEvt.clientX - e.clientX) > 3 || Math.abs(moveEvt.clientY - e.clientY) > 3) {
+                        isDragging = true;
+                    }
+
                     if (!isDragging || !_globalDragClone) return;
 
+                    _globalDragClone.style.display = 'flex';
                     _globalDragClone.style.left = (moveEvt.clientX - offsetX) + 'px';
                     _globalDragClone.style.top = (moveEvt.clientY - offsetY) + 'px';
 
@@ -586,7 +852,7 @@
                 };
 
                 document.addEventListener('mousemove', _globalMouseHandler);
-            }, 0); // 150ms delay
+            }, 0); // 0ms delay as user requested
         });
 
         // Si on relâche la souris avant les 150ms, c'est un clic normal, on annule le drag
@@ -596,7 +862,36 @@
 
         // --- 3. MOUSEUP (Le Drop) ---
         document.addEventListener('mouseup', (e) => {
-            if (!isDragging || !draggedItemInfo) return;
+            if (!draggedItemInfo) return;
+
+            // If we didn't drag, it was a click!
+            if (!isDragging) {
+                const zone = draggedItemInfo.fromZone;
+                const itemName = draggedItemInfo.itemName;
+
+                if (zone === 'bag') {
+                    if (canFitItem(itemName, 'container')) {
+                        const depleted = moveOneItem(itemName, state.bagItems, state.containerItems);
+                        if (depleted) {
+                            const skIdx = state.shortkeyItems.findIndex(i => i && i.name === itemName);
+                            if (skIdx !== -1) {
+                                state.shortkeyItems[skIdx] = null;
+                                postNUI('setShortkey', { slot: skIdx, item: null });
+                            }
+                        }
+                        postNUI('moveItem', { fromZone: 'bag', toZone: 'container', item: itemName, count: 1, containerType: state.containerType });
+                    }
+                } else if (zone === 'container') {
+                    if (canFitItem(itemName, 'bag')) {
+                        moveOneItem(itemName, state.containerItems, state.bagItems);
+                        postNUI('moveItem', { fromZone: 'container', toZone: 'bag', item: itemName, count: 1, containerType: state.containerType });
+                    }
+                }
+
+                _cleanupGlobalDrag();
+                renderAll();
+                return;
+            }
 
             if (_globalDragClone) _globalDragClone.style.display = 'none';
             const elemBelow = document.elementFromPoint(e.clientX, e.clientY);
@@ -655,6 +950,7 @@
                     postNUI('moveItem', { fromZone: 'container', toZone: 'bag', item: itemName, count: 1, containerType: state.containerType });
                 }
                 else if (toZone === 'shortkey') {
+                    // Registration only: just set the shortcut (works even if in container)
                     const allSourceItems = [...state.bagItems, ...state.containerItems];
                     const itemData = allSourceItems.find(i => i && i.name === itemName);
                     state.shortkeyItems[toIndex] = itemData ? { ...itemData } : { name: itemName, count: 1 };
@@ -710,6 +1006,17 @@
             if (data.money !== undefined) {
                 dom.money.textContent = data.money.toLocaleString('en-US');
             }
+
+            state.autoReload = data.autoReload || false;
+            // Hide ammo filter if autoReload is true
+            const ammoFilter = document.querySelector('.filter-btn[data-filter="ammo"]');
+            if (ammoFilter) {
+                if (state.autoReload) {
+                    ammoFilter.classList.add('hidden');
+                } else {
+                    ammoFilter.classList.remove('hidden');
+                }
+            }
         }
 
         state.isOpen = true;
@@ -727,6 +1034,28 @@
     }
 
     // ─── Event Listeners ──────────────────────────────────────
+
+    // Sidebar Tabs
+    dom.sidebarItems.forEach(item => {
+        item.addEventListener('click', () => {
+            const tab = item.dataset.tab;
+            if (tab === 'settings') return;
+
+            state.currentTab = tab;
+
+            // UI Update (Sidebar active state)
+            dom.sidebarItems.forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
+
+            if (tab === 'shop') {
+                postNUI('getShopItems');
+            } else if (tab === 'profile') {
+                postNUI('getProfileData');
+            }
+
+            renderAll();
+        });
+    });
 
     // NUI messages from Lua
     window.addEventListener('message', (event) => {
@@ -748,14 +1077,30 @@
                 }
                 renderAll();
                 break;
+            case 'updateShop':
+                state.shopItems = data.shop || [];
+                renderAll();
+                break;
+            case 'updateProfile':
+                renderProfile(data.data);
+                break;
         }
     });
 
     // ESC or TAB to close
     document.addEventListener('keydown', (e) => {
-        if ((e.key === 'Escape' || e.key === 'Tab') && state.isOpen) {
+        if (e.key === 'Escape' && state.isOpen) {
             e.preventDefault();
             closeInventory();
+        } else if (e.key === 'Tab' && state.isOpen) {
+            e.preventDefault();
+            if (state.currentTab === 'shop' || state.currentTab === 'profile') {
+                // Find and click the inventory sidebar item
+                const invTab = Array.from(dom.sidebarItems).find(i => i.dataset.tab === 'inventory');
+                if (invTab) invTab.click();
+            } else {
+                closeInventory();
+            }
         }
     });
 
@@ -785,9 +1130,27 @@
 
     // Click outside to close context menu
     document.addEventListener('click', (e) => {
-        if (!dom.contextMenu.contains(e.target)) {
+        if (!dom.contextMenu.contains(e.target) && !sellModal.overlay.contains(e.target)) {
             hideContextMenu();
         }
+    });
+
+    // Shop search & filters
+    const shopSearch = $('#shop-search');
+    if (shopSearch) {
+        shopSearch.addEventListener('input', (e) => {
+            state.shopSearchQuery = e.target.value;
+            renderShop();
+        });
+    }
+
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            state.shopFilter = btn.dataset.filter;
+            renderShop();
+        });
     });
 
 

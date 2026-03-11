@@ -16,14 +16,48 @@ local nearbyBag = nil
 local spawnedVehicle = nil
 local spawnedVehicleModel = nil
 local currentContainerType = 'protected' -- 'protected' or 'stash'
+local isUsingItem = false
 
 local weaponConfig = {
-    ['AMMO_12']     = {"WEAPON_PUMPSHOTGUN", "WEAPON_SAWNOFFSHOTGUN", "WEAPON_BULLPUPSHOTGUN"},
-    ['AMMO_45']     = {"WEAPON_PISTOL", "WEAPON_COMBATPISTOL", "WEAPON_APPISTOL", "WEAPON_VINTAGEPISTOL"},
-    ['AMMO_50']     = {"WEAPON_SNIPERRIFLE", "WEAPON_HEAVYSNIPER", "WEAPON_MARKSMANRIFLE"},
-    ['AMMO_556']    = {"WEAPON_CARBINERIFLE", "WEAPON_ADVANCEDRIFLE", "WEAPON_SPECIALCARBINE"},
-    ['AMMO_762']    = {"WEAPON_ASSAULTRIFLE", "WEAPON_BULLPUPRIFLE", "WEAPON_COMBATMG"},
-    ['AMMO_ROCKET'] = {"WEAPON_RPG", "WEAPON_HOMINGLAUNCHER", "WEAPON_COMPACTLAUNCHER"}
+    ['AMMO_12'] = {
+        "WEAPON_PUMPSHOTGUN", "WEAPON_SAWNOFFSHOTGUN", "WEAPON_BULLPUPSHOTGUN", 
+        "WEAPON_ASSAULTSHOTGUN", "WEAPON_HEAVYSHOTGUN", 
+        "WEAPON_DBLSHOTGUN", "WEAPON_AUTOSHOTGUN", "WEAPON_COMBATSHOTGUN", 
+        "WEAPON_PUMPSHOTGUN_MK2"
+    },
+
+    ['AMMO_45'] = {
+        "WEAPON_PISTOL", "WEAPON_COMBATPISTOL", "WEAPON_APPISTOL", 
+        "WEAPON_SNSPISTOL", "WEAPON_VINTAGEPISTOL", "WEAPON_DOUBLEACTION", 
+        "WEAPON_CERAMICPISTOL", "WEAPON_GADGETPISTOL", "WEAPON_PISTOL_MK2", 
+        "WEAPON_SNSPISTOL_MK2", "WEAPON_MICROSMG", "WEAPON_SMG", 
+        "WEAPON_ASSAULTSMG", "WEAPON_COMBATPDW", "WEAPON_MACHINEPISTOL", 
+        "WEAPON_MINISMG", "WEAPON_SMG_MK2"
+    },
+
+    ['AMMO_50'] = {
+        "WEAPON_PISTOL50", "WEAPON_HEAVYPISTOL", "WEAPON_MARKSMANPISTOL", 
+        "WEAPON_REVOLVER", "WEAPON_REVOLVER_MK2", "WEAPON_SNIPERRIFLE", 
+        "WEAPON_HEAVYSNIPER", "WEAPON_MARKSMANRIFLE", "WEAPON_PRECISIONRIFLE", 
+        "WEAPON_HEAVYSNIPER_MK2", "WEAPON_MARKSMANRIFLE_MK2", "WEAPON_MUSKET"
+    },
+
+    ['AMMO_556'] = {
+        "WEAPON_CARBINERIFLE", "WEAPON_ADVANCEDRIFLE", "WEAPON_SPECIALCARBINE", 
+        "WEAPON_BULLPUPRIFLE", "WEAPON_MILITARYRIFLE", "WEAPON_TACTICALRIFLE", 
+        "WEAPON_CARBINERIFLE_MK2", "WEAPON_SPECIALCARBINE_MK2", "WEAPON_BULLPUPRIFLE_MK2"
+    },
+
+    ['AMMO_762'] = {
+        "WEAPON_ASSAULTRIFLE", "WEAPON_COMPACTRIFLE", "WEAPON_HEAVYRIFLE", 
+        "WEAPON_ASSAULTRIFLE_MK2", "WEAPON_MG", "WEAPON_COMBATMG", 
+        "WEAPON_COMBATMG_MK2"
+    },
+
+    ['AMMO_ROCKET'] = {
+        "WEAPON_RPG", "WEAPON_HOMINGLAUNCHER", "WEAPON_COMPACTLAUNCHER", 
+        "WEAPON_GRENADELAUNCHER","WEAPON_FLAREGUN"
+    },
 }
 
 local function GetPlayerCash()
@@ -45,7 +79,6 @@ end
 
 function OpenInventory()
     if isOpen then return end
-    if #CachedBag == 0 and #CustomContainer == 0 then return end
 
     isOpen = true
     SetNuiFocus(true, true)
@@ -66,7 +99,8 @@ function OpenInventory()
         containerLabel = containerLabel,
         playerName = GetPlayerName(PlayerId()),
         playerId = GetPlayerServerId(PlayerId()),
-        money = GetPlayerCash()
+        money = GetPlayerCash(),
+        autoReload = Config.AutoReloadOnEquip
     })
 end
 
@@ -88,7 +122,8 @@ function RefreshInventoryNUI()
         containerLabel = containerLabel,
         playerName = GetPlayerName(PlayerId()),
         playerId = GetPlayerServerId(PlayerId()),
-        money = GetPlayerCash()
+        money = GetPlayerCash(),
+        autoReload = Config.AutoReloadOnEquip
     })
 end
 
@@ -104,6 +139,15 @@ Citizen.CreateThread(function()
         local sleep = 0
         local playerPed = PlayerPedId()
         local playerCoords = GetEntityCoords(playerPed)
+        
+        -- 0. DÉSACTIVER COUP DE CROSSE (MELEE) SI ARMÉ
+        if IsPedArmed(playerPed, 6) then
+            DisableControlAction(0, 140, true) 
+            DisableControlAction(0, 141, true)
+            DisableControlAction(0, 142, true)
+            DisableControlAction(0, 263, true)
+            DisableControlAction(0, 264, true)
+        end
 
         -- 1. GESTION DE L'INVENTAIRE (TAB)
         DisableControlAction(0, 37, true)
@@ -157,10 +201,15 @@ Citizen.CreateThread(function()
                             local weaponName = isCustomWeapon and Config.WeaponItems[itemName] or itemName
                             local weaponHash = GetHashKey(weaponName)
                             if currentWeapon == itemName then
+                                local weaponToUnload = isCustomWeapon and Config.WeaponItems[itemName] or itemName
+                                local weaponHashToUnload = GetHashKey(weaponToUnload)
+                                local currentAmmo = GetAmmoInPedWeapon(playerPed, weaponHashToUnload)
+                                TriggerServerEvent('az_inventory:updateWeaponAmmo', itemName, currentAmmo)
+
                                 SetCurrentPedWeapon(playerPed, GetHashKey("WEAPON_UNARMED"), true)
                                 currentWeapon = nil
                             else
-                                if HasPedGotWeapon(playerPed, weaponHash, false) then
+                                if HasPedGotWeapon(playerPed, weaponHash, false) and not Config.AutoReloadOnEquip then
                                     SetCurrentPedWeapon(playerPed, weaponHash, true)
                                     currentWeapon = itemName
                                     TriggerEvent('az_container:refreshWeaponComponents')
@@ -177,9 +226,13 @@ Citizen.CreateThread(function()
                         else
                             -- --- CORRECTION POUR LES CONSOMMABLES ---
                             -- On demande directement au serveur d'utiliser l'item du slot
-                            ESX.TriggerServerCallback('az_inventory:useItem', function(success)
-                                -- On ne fait rien de spécial ici, le serveur va trigger useConsumable
-                            end, itemName, i - 1)
+                            if isUsingItem then
+                                exports['az_notify']:ShowNotification('~r~You are already using an item')
+                            else
+                                ESX.TriggerServerCallback('az_inventory:useItem', function(success)
+                                    -- On ne fait rien de spécial ici, le serveur va trigger useConsumable
+                                end, itemName, i - 1)
+                            end
                         end
                     end
                 end
@@ -194,18 +247,29 @@ Citizen.CreateThread(function()
                 local dist = #(playerCoords - vehCoords)
                 
                 if dist < 10.0 or GetVehiclePedIsIn(playerPed, false) == spawnedVehicle then
-                    local modelToReturn = spawnedVehicleModel or "deluxo"
-                    ESX.Game.DeleteVehicle(spawnedVehicle)
-                    spawnedVehicle = nil
-                    spawnedVehicleModel = nil
-                    TriggerServerEvent('az_inventory:returnVehicleItem', modelToReturn)
-                    exports['az_notify']:ShowNotification('~g~Véhicule rangé dans votre inventaire !')
+                    -- NEW: Restrictions (must be stationary and on ground)
+                    local speed = GetEntitySpeed(spawnedVehicle) * 3.6 -- km/h
+                    local IsOnGround = IsVehicleOnAllWheels(spawnedVehicle)
+                    
+                    if speed > 5.0 then
+                        exports['az_notify']:ShowNotification('~r~You must be stationary to store the vehicle !')
+                    elseif not IsOnGround then
+                        exports['az_notify']:ShowNotification('~r~Your vehicle must be on the ground to be stored !')
+                    else
+                        local modelToReturn = spawnedVehicleModel or "deluxo"
+                        local mods = ESX.Game.GetVehicleProperties(spawnedVehicle)
+                        ESX.Game.DeleteVehicle(spawnedVehicle)
+                        spawnedVehicle = nil
+                        spawnedVehicleModel = nil
+                        TriggerServerEvent('az_inventory:returnVehicleItem', modelToReturn, mods)
+                        exports['az_notify']:ShowNotification('~g~Vehicle stored')
 
-                    Citizen.SetTimeout(500, function()
-                        if isOpen then RefreshInventoryNUI() end
-                    end)
+                        Citizen.SetTimeout(500, function()
+                            if isOpen then RefreshInventoryNUI() end
+                        end)
+                    end
                 else
-                    exports['az_notify']:ShowNotification('~r~Vous êtes trop loin de votre véhicule.')
+                    exports['az_notify']:ShowNotification('~r~You are too far of your vehicle')
                 end
             end
         end
@@ -221,7 +285,7 @@ Citizen.CreateThread(function()
                 sleep = 0
                 nearbyBag = bagId
                 BeginTextCommandDisplayHelp("STRING")
-                AddTextComponentSubstringPlayerName("Appuyez sur ~INPUT_CONTEXT~ ~w~pour ramasser le sac")
+                AddTextComponentSubstringPlayerName("Press ~INPUT_CONTEXT~ ~w~to claim the bag")
                 EndTextCommandDisplayHelp(0, false, true, -1)
 
                 if IsControlJustReleased(0, 38) then 
@@ -311,8 +375,10 @@ RegisterNUICallback('moveItem', function(data, cb)
     local isMovingToContainer = (data.toZone == 'container')
 
     if selectedWeapon == weaponHash and isMovingFromPlayer and isMovingToContainer then
+        local currentAmmo = GetAmmoInPedWeapon(playerPed, weaponHash)
+        TriggerServerEvent('az_inventory:updateWeaponAmmo', data.item, currentAmmo)
         TriggerEvent('az_inventory:removeWeaponFromPed', data.item)
-        exports['az_notify']:ShowNotification('Vous avez rangé votre arme')
+        exports['az_notify']:ShowNotification('You stored your weapon')
     end
 
     ESX.TriggerServerCallback('az_inventory:moveItem', function(success, updatedContainer)
@@ -331,6 +397,33 @@ RegisterNUICallback('moveItem', function(data, cb)
 end)
 
 RegisterNUICallback('useItem', function(data, cb)
+    if isUsingItem then
+        exports['az_notify']:ShowNotification('~r~You are already using an item')
+        cb({ success = false })
+        return
+    end
+
+    if data.isAmmo then
+        local ped = PlayerPedId()
+        local weaponHash = GetSelectedPedWeapon(ped)
+        local canUseAmmo = false
+
+        if weaponHash ~= GetHashKey("WEAPON_UNARMED") then
+            for _, weaponName in ipairs(weaponConfig[data.item] or {}) do
+                if weaponHash == GetHashKey(weaponName) then
+                    canUseAmmo = true
+                    break
+                end
+            end
+        end
+
+        if not canUseAmmo then
+            exports['az_notify']:ShowNotification("~r~Vous devez avoir l'arme correspondante en main pour utiliser ces munitions.")
+            cb({ success = false })
+            return
+        end
+    end
+
     ESX.TriggerServerCallback('az_inventory:useItem', function(success)
         if success then
             TriggerEvent('esx:onPlayerData', ESX.GetPlayerData())
@@ -339,8 +432,18 @@ RegisterNUICallback('useItem', function(data, cb)
     end, data.item, data.slot)
 end)
 
+RegisterNUICallback('notifyError', function(data, cb)
+    exports['az_notify']:ShowNotification(data.message)
+    cb('ok')
+end)
+
 RegisterNUICallback('dropItem', function(data, cb)
     if currentWeapon and data.item == currentWeapon then
+        local playerPed = PlayerPedId()
+        local weaponHash = GetSelectedPedWeapon(playerPed)
+        local currentAmmo = GetAmmoInPedWeapon(playerPed, weaponHash)
+
+        TriggerServerEvent('az_inventory:updateWeaponAmmo', data.item, currentAmmo)
         TriggerEvent('az_inventory:removeWeaponFromPed', currentWeapon)
         exports['az_notify']:ShowNotification('~y~Arme déséquipée automatiquement.')
     end
@@ -353,13 +456,26 @@ end)
 
 RegisterNUICallback('giveItem', function(data, cb)
     if currentWeapon and data.item == currentWeapon then
+        local playerPed = PlayerPedId()
+        local weaponHash = GetSelectedPedWeapon(playerPed)
+        local currentAmmo = GetAmmoInPedWeapon(playerPed, weaponHash)
+
+        TriggerServerEvent('az_inventory:updateWeaponAmmo', data.item, currentAmmo)
         TriggerEvent('az_inventory:removeWeaponFromPed', currentWeapon)
         exports['az_notify']:ShowNotification('Vous avez rangé votre arme')
     end
 
+    local closestPlayer, closestDistance = ESX.Game.GetClosestPlayer()
+
+    if closestPlayer == -1 or closestDistance > 3.0 then
+        exports['az_notify']:ShowNotification('~r~Aucun joueur à proximité.')
+        cb({ success = false })
+        return
+    end
+
     ESX.TriggerServerCallback('az_inventory:giveItem', function(success)
         cb({ success = success })
-    end, data.item, data.count)
+    end, data.item, data.count, GetPlayerServerId(closestPlayer))
 end)
 
 RegisterNUICallback('setShortkey', function(data, cb)
@@ -369,12 +485,15 @@ RegisterNUICallback('setShortkey', function(data, cb)
     if oldItem ~= nil and oldItem ~= false and oldItem == currentWeapon then
         local playerPed = PlayerPedId()
         
-        SetCurrentPedWeapon(playerPed, GetHashKey("WEAPON_UNARMED"), true)
-        
         local weaponHash = GetHashKey(oldItem)
         if Config and Config.WeaponItems and Config.WeaponItems[oldItem] then
             weaponHash = GetHashKey(Config.WeaponItems[oldItem])
         end
+
+        local currentAmmo = GetAmmoInPedWeapon(playerPed, weaponHash)
+        TriggerServerEvent('az_inventory:updateWeaponAmmo', oldItem, currentAmmo)
+
+        SetCurrentPedWeapon(playerPed, GetHashKey("WEAPON_UNARMED"), true)
         RemoveWeaponFromPed(playerPed, weaponHash)
         
         currentWeapon = nil
@@ -391,14 +510,70 @@ RegisterNUICallback('setShortkey', function(data, cb)
     cb('ok')
 end)
 
+RegisterNUICallback('getShopItems', function(data, cb)
+    ESX.TriggerServerCallback('az_inventory:getShopItems', function(shopItems)
+        local myIdentifier = ESX.GetPlayerData().identifier
+        for _, it in ipairs(shopItems) do
+            it.isMine = (it.identifier == myIdentifier)
+        end
+        SendNUIMessage({
+            action = 'updateShop',
+            shop = shopItems
+        })
+        cb('ok')
+    end)
+end)
+
+RegisterNetEvent('az_inventory:updateShop')
+AddEventHandler('az_inventory:updateShop', function(shopItems)
+    local myIdentifier = ESX.GetPlayerData().identifier
+    for _, it in ipairs(shopItems) do
+        it.isMine = (it.identifier == myIdentifier)
+    end
+    SendNUIMessage({
+        action = 'updateShop',
+        shop = shopItems
+    })
+end)
+
+RegisterNUICallback('sellItem', function(data, cb)
+    TriggerServerEvent('az_inventory:sellItem', data.item, data.label, data.count, data.price)
+    cb('ok')
+end)
+
+RegisterNUICallback('buyItem', function(data, cb)
+    ESX.TriggerServerCallback('az_inventory:buyItem', function(success)
+        cb({ success = success })
+    end, data.id)
+end)
+
+RegisterNUICallback('getProfileData', function(data, cb)
+    ESX.TriggerServerCallback('az_inventory:getProfileData', function(profileData)
+        SendNUIMessage({
+            action = 'updateProfile',
+            data = profileData
+        })
+        cb('ok')
+    end)
+end)
+
+RegisterNUICallback('removeItem', function(data, cb)
+    ESX.TriggerServerCallback('az_inventory:removeItem', function(success)
+        cb({ success = success })
+    end, data.id)
+end)
+
 RegisterNetEvent('az_inventory:giveWeaponToPed')
-AddEventHandler('az_inventory:giveWeaponToPed', function(itemName, actualWeaponName)
+AddEventHandler('az_inventory:giveWeaponToPed', function(itemName, actualWeaponName, ammoCount)
     local playerPed = PlayerPedId()
     local weaponToGive = actualWeaponName or itemName
     local weaponHash = GetHashKey(weaponToGive)
+    local ammo = ammoCount or 0
 
     if not HasPedGotWeapon(playerPed, weaponHash, false) then
-        GiveWeaponToPed(playerPed, weaponHash, 30, false, true)
+        GiveWeaponToPed(playerPed, weaponHash, ammo, false, true)
+    else
+        SetPedAmmo(playerPed, weaponHash, ammo)
     end
 
     SetCurrentPedWeapon(playerPed, weaponHash, true)
@@ -424,8 +599,8 @@ AddEventHandler('az_inventory:removeWeaponFromPed', function(itemName)
     end
 end)
 
- RegisterNetEvent('az_inventory:spawnVehicle')
-AddEventHandler('az_inventory:spawnVehicle', function(model)
+RegisterNetEvent('az_inventory:spawnVehicle')
+AddEventHandler('az_inventory:spawnVehicle', function(model, mods)
     if spawnedVehicle and DoesEntityExist(spawnedVehicle) then
         exports['az_notify']:ShowNotification('~r~Vous avez déjà un véhicule sorti !')
         return
@@ -438,6 +613,11 @@ AddEventHandler('az_inventory:spawnVehicle', function(model)
     ESX.Game.SpawnVehicle(model, coords, heading, function(vehicle)
         spawnedVehicle = vehicle
         spawnedVehicleModel = model
+        
+        if mods then
+            ESX.Game.SetVehicleProperties(vehicle, mods)
+        end
+        
         TaskWarpPedIntoVehicle(playerPed, vehicle, -1)
         exports['az_notify']:ShowNotification('~g~Véhicule sorti ! Appuyez sur ~y~K ~g~pour le ranger.')
     end)
@@ -445,13 +625,16 @@ end)
 
 RegisterNetEvent('az_inventory:useConsumable')
 AddEventHandler('az_inventory:useConsumable', function(itemName)
+    if isUsingItem then return end
+    isUsingItem = true
+
     local playerPed = PlayerPedId()
     
     local animDict = "amb@medic@standing@tendtodead@idle_a"
     local animName = "idle_a"
-    local duration = 1000
+    local duration = 1000 -- Augmenté un peu pour que ce soit plus visible et utile contre le spam
 
-    exports['az_progressbars']:startUI(duration, "Applying...")
+    exports['az_progressbars']:startUI(duration, "Applying item...")
 
     RequestAnimDict(animDict)
     while not HasAnimDictLoaded(animDict) do Wait(10) end
@@ -460,11 +643,22 @@ AddEventHandler('az_inventory:useConsumable', function(itemName)
 
     Wait(duration)
 
-    if string.find(itemName, "MEDKIT") or string.find(itemName, "BANDAGE") or string.find(itemName, "GREEN") or string.find(itemName, "RED") then
+    if string.find(itemName, "MEDKIT") or string.find(itemName, "BANDAGE") then
         SetEntityHealth(playerPed, 200)
+    elseif string.find(itemName, "RED") then
+        -- Red Syringe: Heal to full
+        SetEntityHealth(playerPed, 200)
+    elseif string.find(itemName, "GREEN") then
+        -- Green Syringe: Clear Zombies for 5 min
+        TriggerEvent('az_zombie:clearZombies', 300000)
+    elseif string.find(itemName, "BLUE") then
+        -- Blue Syringe: Infinite stamina for 1 min
+        TriggerEvent('az_inventory:infiniteStamina', 60000)
     end
     
-    if string.find(itemName, "KEVLAR") or string.find(itemName, "BLUE") or string.find(itemName, "RED") then
+    exports['az_notify']:ShowNotification("Item applied")
+    
+    if string.find(itemName, "KEVLAR") then
         SetPedArmour(playerPed, 100)
     end
 
@@ -472,6 +666,7 @@ AddEventHandler('az_inventory:useConsumable', function(itemName)
     ClearPedBloodDamage(playerPed)
     
     TriggerServerEvent('az_inventory:removeItemAfterUse', itemName)
+    isUsingItem = false
 end)
 
 RegisterNetEvent('az_inventory:useAmmo')
@@ -489,13 +684,8 @@ AddEventHandler('az_inventory:useAmmo', function(ammoName, count, label)
         end
 
         if found then
-            -- Animation de rechargement (optionnel)
-            TaskReloadWeapon(ped, true)
-            
-            -- Ajout des munitions
             AddAmmoToPed(ped, weaponHash, count)
-            
-            -- Notification de succès
+        
             exports['az_notify']:ShowNotification("~g~Rechargement effectué : ~s~" .. label .. " (+" .. count .. ")")
             
             -- On prévient le serveur de retirer l'item
@@ -505,5 +695,63 @@ AddEventHandler('az_inventory:useAmmo', function(ammoName, count, label)
         end
     else
         exports['az_notify']:ShowNotification("~r~Vous devez avoir une arme en main.")
+    end
+end)
+
+-- Effect handler for Blue Syringe (Infinite Stamina)
+RegisterNetEvent('az_inventory:infiniteStamina')
+AddEventHandler('az_inventory:infiniteStamina', function(duration)
+    exports['az_notify']:ShowNotification("~b~Vous vous sentez plein d'énergie ! (1 min)")
+    
+    local endTime = GetGameTimer() + duration
+    
+    Citizen.CreateThread(function()
+        while GetGameTimer() < endTime do
+            Citizen.Wait(0)
+            RestorePlayerStamina(PlayerId(), 1.0)
+        end
+        exports['az_notify']:ShowNotification("~r~L'effet de la seringue bleue s'est dissipé.")
+    end)
+end)
+
+RegisterNetEvent('esx:onPlayerDeath')
+AddEventHandler('esx:onPlayerDeath', function(data)
+    -- data typically contains killerServerId, killerConnectionId, etc.
+TriggerServerEvent('az_inventory:dropBagOnDeath', data.killerServerId)
+end)
+
+-- Drive-by restriction: Disable shooting and weapon wheel while in a vehicle
+Citizen.CreateThread(function()
+    while true do
+        local sleep = 500
+        local playerPed = PlayerPedId()
+        
+        if IsPedInAnyVehicle(playerPed, false) then
+            sleep = 0
+            -- Disables attacking/firing
+            DisableControlAction(0, 24, true) -- Attack
+            DisableControlAction(0, 69, true) -- Attack (Vehicle)
+            DisableControlAction(0, 70, true) -- Attack (Vehicle)
+            DisableControlAction(0, 92, true) -- Attack (Vehicle)
+            DisableControlAction(0, 114, true) -- Aim (Vehicle)
+            DisableControlAction(0, 257, true) -- Attack 2
+            DisableControlAction(0, 331, true) -- Attack (Vehicle)
+            
+            -- Disables weapon selection/wheel
+            DisableControlAction(0, 37, true)  -- Weapon Wheel (TAB)
+            DisableControlAction(0, 81, true)  -- Vehicle Next Weapon
+            DisableControlAction(0, 82, true)  -- Vehicle Previous Weapon
+            DisableControlAction(0, 99, true)  -- Vehicle Select Next Weapon
+            DisableControlAction(0, 100, true) -- Vehicle Select Previous Weapon
+            DisableControlAction(0, 261, true) -- Mouse Wheel Next
+            DisableControlAction(0, 262, true) -- Mouse Wheel Previous
+            
+            -- Force unarmed to be sure no weapon is visible
+            if GetSelectedPedWeapon(playerPed) ~= `WEAPON_UNARMED` then
+                SetCurrentPedWeapon(playerPed, `WEAPON_UNARMED`, true)
+            end
+        end
+        
+        Citizen.Wait(sleep)
     end
 end)

@@ -17,35 +17,29 @@
         <nav class="sidebar">
             <ul class="sidebar-menu">
                 <li class="sidebar-item active" data-tab="inventory" title="Inventory">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                         stroke-width="1.5">
                         <path d="M20 7H4a2 2 0 00-2 2v10a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2z" />
                         <path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2" />
                     </svg>
                 </li>
                 <li class="sidebar-item" data-tab="profile" title="Profile">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                         stroke-width="1.5">
                         <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
                         <circle cx="12" cy="7" r="4" />
                     </svg>
                 </li>
-                <li class="sidebar-item" data-tab="map" title="Map">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                <li class="sidebar-item" data-tab="shop" title="Shop">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                         stroke-width="1.5">
-                        <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
-                        <line x1="8" y1="2" x2="8" y2="18" />
-                        <line x1="16" y1="6" x2="16" y2="22" />
-                    </svg>
-                </li>
-                <li class="sidebar-item" data-tab="clothing" title="Clothing">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        stroke-width="1.5">
-                        <path d="M6 2L2 6v4l4-2 1 14h10l1-14 4 2V6l-4-4-3 3H9L6 2z" />
+                        <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4H6z" />
+                        <line x1="3" y1="6" x2="21" y2="6" />
+                        <path d="M16 10a4 4 0 01-8 0" />
                     </svg>
                 </li>
                 <li class="sidebar-item" data-tab="settings" title="Settings">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                         stroke-width="1.5">
                         <circle cx="12" cy="12" r="3" />
                         <path
@@ -107,6 +101,100 @@
                     <div class="item-grid" id="container-grid"></div>
                 </section>
 
+                <!-- SHOP SECTION -->
+                <section class="inv-section hidden" id="section-shop">
+                    <div class="section-header">
+                        <span class="section-label">GLOBAL MARKETPLACE</span>
+                        <div class="shop-controls">
+                            <div class="shop-filters">
+                                <button class="filter-btn active" data-filter="all">All</button>
+                                <button class="filter-btn" data-filter="weapon">Weapons</button>
+                                <button class="filter-btn" data-filter="ammo">Ammo</button>
+                                <button class="filter-btn" data-filter="medical">Medical</button>
+                                <button class="filter-btn" data-filter="other">Other</button>
+                                <button class="filter-btn filter-btn--mine" data-filter="mysell">My Sell</button>
+                            </div>
+                            <div class="search-wrapper">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"></circle>
+                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                </svg>
+                                <input type="text" id="shop-search" placeholder="Search for an item...">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="item-grid" id="shop-grid"></div>
+                </section>
+
+                <!-- PROFILE SECTION -->
+                <section class="inv-section hidden" id="section-profile">
+                    <div class="section-header">
+                        <span class="section-label">PLAYER PROFILE</span>
+                    </div>
+                    <div class="profile-container">
+                        <!-- Stats Column -->
+                        <div class="profile-stats">
+                            <div class="profile-card">
+                                <div class="profile-avatar">
+                                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5">
+                                        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+                                        <circle cx="12" cy="7" r="4" />
+                                    </svg>
+                                </div>
+                                <div class="profile-info">
+                                    <h2 id="profile-name">Loading...</h2>
+                                    <span id="profile-id">ID: 0</span>
+                                </div>
+                            </div>
+
+                            <div class="stats-grid">
+                                <div class="stat-box">
+                                    <span class="stat-value" id="stat-kills">0</span>
+                                    <span class="stat-label">KILLS</span>
+                                </div>
+                                <div class="stat-box">
+                                    <span class="stat-value" id="stat-deaths">0</span>
+                                    <span class="stat-label">DEATHS</span>
+                                </div>
+                                <div class="stat-box accent">
+                                    <span class="stat-value" id="stat-kda">0.00</span>
+                                    <span class="stat-label">K/D RATIO</span>
+                                </div>
+                                <div class="stat-box">
+                                    <span class="stat-value" id="stat-assists">0</span>
+                                    <span class="stat-label">ASSISTS</span>
+                                </div>
+                                <div class="stat-box confirm">
+                                    <span class="stat-value" id="stat-kill-confirmed">0</span>
+                                    <span class="stat-label">KILL CONFIRMED</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Leaderboard Column -->
+                        <div class="profile-leaderboard">
+                            <div class="leaderboard-header">
+                                <h3>GLOBAL RANKING</h3>
+                            </div>
+                            <div class="leaderboard-table-container">
+                                <table class="leaderboard-table">
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>NAME</th>
+                                            <th>KILLS</th>
+                                            <th>K/D</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="leaderboard-body">
+                                        <!-- Rows generated by JS -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- HOTBAR / SHORTKEYS -->
                 <section class="inv-section inv-section--hotbar" id="section-hotbar">
                     <div class="section-header">
@@ -151,6 +239,24 @@
             </svg>
             <span>Drop</span>
         </div>
+        <div class="context-menu-item" data-action="buy" id="ctx-buy-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4zM3 6h18M16 10a4 4 0 01-8 0" />
+            </svg>
+            <span>Buy</span>
+        </div>
+        <div class="context-menu-item" data-action="sell" id="ctx-sell-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
+            </svg>
+            <span>Sell</span>
+        </div>
+        <div class="context-menu-item context-menu-item--danger" data-action="remove" id="ctx-remove-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+            </svg>
+            <span>Remove</span>
+        </div>
     </div>
 
     <!-- Tooltip -->
@@ -166,6 +272,29 @@
     <!-- Hidden player info for JS -->
     <span id="player-name" style="display:none">John Doe</span>
     <span id="player-id" style="display:none">42</span>
+
+    <div id="sell-modal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Sell Item</h2>
+                <button class="modal-close" id="sell-cancel-x">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-group">
+                    <label>Quantity</label>
+                    <input type="number" id="sell-qty" min="1" placeholder="1">
+                </div>
+                <div class="input-group">
+                    <label>Unit Price ($)</label>
+                    <input type="number" id="sell-price" min="1" placeholder="100">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="sell-cancel-btn">Cancel</button>
+                <button class="btn btn-primary" id="sell-confirm-btn">Confirm Sale</button>
+            </div>
+        </div>
+    </div>
 
     <script src="script.js"></script>
 </body>
